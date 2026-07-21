@@ -1,5 +1,4 @@
 // Factory OS v2.0 — All features, secrets from .env
-import.meta.env; // triggers Vite env injection
 
 // Inject screens HTML
 document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
@@ -1098,9 +1097,9 @@ const FG_STAGES=['Moulding','Finishing','Painting','Packing'];
 const SPC=['sp0','sp1','sp2','sp3','sp4'];
 const MNAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const LS_KEY='frp_factory_v5';
-const SHEETS_URL = import.meta.env.VITE_SHEETS_URL || '';
+const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwsVDnWwv1lH5EqwYLLPyu7GXLobPAAjfa7vL1Oc6t8Cezd9GiMNbhINwr4iFx5FhG4/exec" || '';
 
-const PASSWORDS={owner:import.meta.env.VITE_OWNER_PASSWORD||'',supervisor:import.meta.env.VITE_SUPERVISOR_PASSWORD||'',rm:import.meta.env.VITE_RM_PASSWORD||''};
+const PASSWORDS={owner:""||'',supervisor:""||'',rm:""||''};
 const ROLE_ACCESS={
   owner:['dashboard','setup','sheets','att','sup','raw','day','month','orders','payments','dispatch','transfers','salary','inventory','stock','rmpurchase','fgstock','docs','bom','export'],
   supervisor:['dashboard','att','sup','raw','day'],
@@ -1702,12 +1701,12 @@ function orderStatusBg(s){return s==='pending'?'var(--amber-l)':s==='production'
 
 // ── FIREBASE ──
 const FB_CONFIG = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: "AIzaSyBoGZtUxjPekDE5_U7yiWSC7C55N-AkNsQ",
+  authDomain: "frp-factory-3e933.firebaseapp.com",
+  projectId: "frp-factory-3e933",
+  storageBucket: "frp-factory-3e933.firebasestorage.app",
+  messagingSenderId: "842971949999",
+  appId: "1:842971949999:web:0263ae517f057288341d5a"
 };
 
 let fbApp = null;
