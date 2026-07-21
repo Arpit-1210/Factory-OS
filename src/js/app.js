@@ -2016,6 +2016,10 @@ function startFirebaseSync(){
       ['fg','lab','rm'].forEach(k=>{if(data[k]!==undefined)S[k]=data[k];});
       localStorage.setItem(LS_KEY,JSON.stringify(S));
       updateSyncDot('ok');
+      // Refresh whatever screen is open so new attendance shows for team building
+      try{if(typeof renderAtt==='function')renderAtt();}catch(e){}
+      const _sid=(document.querySelector('.screen.active')||{}).id?.replace('sc-','');
+      if(_sid) try{go(_sid);}catch(e){}
     },err=>{if(!navigator.onLine)updateSyncDot('err');}));
   }
 
@@ -5162,7 +5166,15 @@ loadScript('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js', f
 
 // ── FIX: Push attendance live when supervisor marks it ──
 function pushAttendanceLive(){
-  if(!fbEnabled||!db||currentRole==='owner') return;
+  if(!fbEnabled||!db) return;
+  // Owner marks attendance → push lab (with present flags) to shared doc immediately
+  if(currentRole==='owner'){
+    db.doc('factory/shared').set({
+      lab: S.lab,
+      _updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    },{merge:true}).catch(function(e){ console.warn('Owner att push:', e); });
+    return;
+  }
   var devId = localStorage.getItem('_sup_device_id');
   if(!devId) return;
   var attData = S.lab.map(function(l){
@@ -5214,10 +5226,8 @@ function pullSupervisorData(){
     var changed=false;
     if(sessions.length>0 && JSON.stringify(sessions)!==JSON.stringify(S.sessions||[])){S.sessions=sessions;changed=true;}
     if(rawLog.length>0 && JSON.stringify(rawLog)!==JSON.stringify(S.rawLog||[])){S.rawLog=rawLog;changed=true;}
-    Object.keys(attMap).forEach(function(id){
-      var l=S.lab.find(function(x){return String(x.id)===String(id);});
-      if(l){l.present=attMap[id].present;l.doingOT=attMap[id].doingOT||false;l.otHours=attMap[id].otHours||0;changed=true;}
-    });
+    // NOTE: owner is the source of truth for attendance — do NOT apply
+    // supervisor attendance back onto owner's lab (it would overwrite owner marks)
     if(changed){
       window.S=S;
       try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
