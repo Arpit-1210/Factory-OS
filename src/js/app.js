@@ -45,6 +45,7 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
           <span style="margin-left:6px">→</span>
         </button>
         <div class="login-error" id="login-error">❌ Wrong email or password.</div>
+        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.1.0</div>
 
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:9px;color:var(--text4);margin-bottom:8px;text-align:center">ENTERING DATA FOR A PAST DATE?</div>
@@ -2010,7 +2011,7 @@ function startFirebaseSync(){
   // 2. Supervisor listens ONLY to shared (catalogue updates) — never to other supervisor docs
   if(currentRole==='supervisor'){
     unsubs.push(db.doc('factory/shared').onSnapshot(snap=>{
-      if(!snap.exists||Date.now()-_lastLocalWrite<5000) return;
+      if(!snap.exists) return; // no _lastLocalWrite guard: supervisors never write lab/fg/rm, so owner updates must always apply
       const data=snap.data();if(!data) return;
       // Only update catalogue data — never sessions/rawLog
       ['fg','lab','rm'].forEach(k=>{if(data[k]!==undefined)S[k]=data[k];});
