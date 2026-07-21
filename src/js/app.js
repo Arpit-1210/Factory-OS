@@ -5173,6 +5173,7 @@ function pushAttendanceLive(){
     var existing = snap.exists ? snap.data() : {};
     existing.attendance = attData;
     existing.workersPresent = attData.filter(function(a){return a.present;}).length;
+    existing._date = (typeof S!=='undefined'&&S.workDate)||todayStr();
     existing._updatedAt = firebase.firestore.FieldValue.serverTimestamp();
     db.doc('supervisors/'+devId).set(existing, {merge:true}).catch(function(e){
       console.warn('Att push:', e);
@@ -5211,8 +5212,8 @@ function pullSupervisorData(){
       });
     });
     var changed=false;
-    if(sessions.length>(S.sessions||[]).length){S.sessions=sessions;changed=true;}
-    if(rawLog.length>(S.rawLog||[]).length){S.rawLog=rawLog;changed=true;}
+    if(sessions.length>0 && JSON.stringify(sessions)!==JSON.stringify(S.sessions||[])){S.sessions=sessions;changed=true;}
+    if(rawLog.length>0 && JSON.stringify(rawLog)!==JSON.stringify(S.rawLog||[])){S.rawLog=rawLog;changed=true;}
     Object.keys(attMap).forEach(function(id){
       var l=S.lab.find(function(x){return String(x.id)===String(id);});
       if(l){l.present=attMap[id].present;l.doingOT=attMap[id].doingOT||false;l.otHours=attMap[id].otHours||0;changed=true;}
@@ -5221,6 +5222,7 @@ function pullSupervisorData(){
       window.S=S;
       try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
       updateSyncDot('ok');
+      try{renderDashboard();}catch(e){}
       var sid=(document.querySelector('.screen.active')||{}).id;
       if(sid) try{go(sid.replace('sc-',''));}catch(e){}
     }
