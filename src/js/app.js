@@ -5258,3 +5258,13 @@ setInterval(function(){
     }
   }catch(e){}
 })();
+
+// ── CLEANUP: unregister stale PWA service worker from old build ──
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.getRegistrations().then(function(regs){
+    regs.forEach(function(r){ r.unregister(); });
+    if(regs.length && window.caches){
+      caches.keys().then(function(keys){ keys.forEach(function(k){ caches.delete(k); }); });
+    }
+  }).catch(function(){});
+}
