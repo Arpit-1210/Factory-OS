@@ -1084,7 +1084,7 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
 function loadScript(src, cb){
   var s = document.createElement('script');
   s.src = src; s.onload = cb||function(){};
-  s.onerror = function(){ if(cb) cb(); };
+  s.onerror = function(){ console.error('Script failed to load: '+src); if(cb) cb(); };
   document.head.appendChild(s);
 }
 
@@ -5141,10 +5141,16 @@ try{
 });
 
 // ── LOAD FIREBASE ──
-loadScript('https://cdn.jsdelivr.net/npm/firebase@10.7.1/firebase-app-compat.min.js', function(){
-  loadScript('https://cdn.jsdelivr.net/npm/firebase@10.7.1/firebase-firestore-compat.min.js', function(){
-    loadScript('https://cdn.jsdelivr.net/npm/firebase@10.7.1/firebase-auth-compat.min.js', function(){
+loadScript('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js', function(){
+  loadScript('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js', function(){
+    loadScript('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js', function(){
       console.log('Firebase SDK loaded');
+      if(typeof firebase !== 'undefined' && typeof initFirebase === 'function' && !fbEnabled){
+        initFirebase();
+      } else if(typeof firebase === 'undefined'){
+        console.error('Firebase SDK failed to load — check network/CDN');
+        updateSyncDot('err');
+      }
     });
   });
 });
