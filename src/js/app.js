@@ -45,7 +45,7 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
           <span style="margin-left:6px">→</span>
         </button>
         <div class="login-error" id="login-error">❌ Wrong email or password.</div>
-        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.8.0</div>
+        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.9.0</div>
 
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:9px;color:var(--text4);margin-bottom:8px;text-align:center">ENTERING DATA FOR A PAST DATE?</div>
@@ -1997,8 +1997,31 @@ function startFirebaseSync(){
       },err=>{if(!navigator.onLine)updateSyncDot('err');}));
     });
 
-    // Owner polls supervisor sessions every 30 seconds instead of live listener
-    // This avoids any risk of overwriting
+    // Owner listens LIVE to all supervisor docs — production appears instantly
+    unsubs.push(db.collection('supervisors').onSnapshot(snap=>{
+      const today=S.workDate||todayStr();
+      if(localStorage.getItem('_day_cleared_'+today)) return;
+      const allSessions=[],allRaw=[];
+      snap.forEach(doc=>{
+        const data=doc.data();
+        if(data._date===today&&!data._dayCleared){
+          (data.sessions||[]).forEach(ss=>{if(!allSessions.find(x=>x.supId===ss.supId))allSessions.push(ss);});
+          (data.rawLog||[]).forEach(r=>{if(!allRaw.find(x=>x.id===r.id))allRaw.push(r);});
+        }
+      });
+      let changed=false;
+      if(allSessions.length>0&&JSON.stringify(allSessions)!==JSON.stringify(S.sessions||[])){S.sessions=allSessions;changed=true;}
+      if(allRaw.length>0&&JSON.stringify(allRaw)!==JSON.stringify(S.rawLog||[])){S.rawLog=allRaw;changed=true;}
+      if(changed){
+        localStorage.setItem(LS_KEY,JSON.stringify(S));
+        updateSyncDot('ok');
+        try{renderDashboard();}catch(e){}
+        const sid=(document.querySelector('.screen.active')||{}).id?.replace('sc-','');
+        if(['dashboard','day','raw','month'].includes(sid)) try{go(sid);}catch(e){}
+      }
+    },err=>{if(!navigator.onLine)updateSyncDot('err');}));
+
+    // Backup poll every 30 seconds (kept as safety net)
     function pollSupervisorSessions(){
       const today=S.workDate||todayStr();
       if(localStorage.getItem('_day_cleared_'+today)) return;
