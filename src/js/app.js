@@ -1976,7 +1976,7 @@ function startFirebaseSync(){
         localStorage.setItem(LS_KEY,JSON.stringify(S));
         updateSyncDot('ok');
         const sid=(document.querySelector('.screen.active')||{}).id?.replace('sc-','');
-        if(['orders','payments','month','salary','dispatch'].includes(sid)) try{go(sid);}catch(e){}
+        if(['orders','payments','month','salary','dispatch','att','dashboard','sup'].includes(sid)) try{go(sid);}catch(e){}
       },err=>{if(!navigator.onLine)updateSyncDot('err');}));
     });
 
