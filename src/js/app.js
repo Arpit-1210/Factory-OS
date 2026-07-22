@@ -45,7 +45,7 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
           <span style="margin-left:6px">→</span>
         </button>
         <div class="login-error" id="login-error">❌ Wrong email or password.</div>
-        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.5.0</div>
+        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.6.0</div>
 
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:9px;color:var(--text4);margin-bottom:8px;text-align:center">ENTERING DATA FOR A PAST DATE?</div>
@@ -1993,7 +1993,7 @@ function startFirebaseSync(){
         localStorage.setItem(LS_KEY,JSON.stringify(S));
         updateSyncDot('ok');
         const sid=(document.querySelector('.screen.active')||{}).id?.replace('sc-','');
-        if(['orders','payments','month','salary','dispatch','att','dashboard','sup'].includes(sid)) try{go(sid);}catch(e){}
+        if(['orders','payments','month','salary','dispatch','att','dashboard'].includes(sid)) try{go(sid);}catch(e){}
       },err=>{if(!navigator.onLine)updateSyncDot('err');}));
     });
 
@@ -2037,10 +2037,10 @@ function startFirebaseSync(){
       ['fg','lab','rm'].forEach(k=>{if(data[k]!==undefined)S[k]=data[k];});
       localStorage.setItem(LS_KEY,JSON.stringify(S));
       updateSyncDot('ok');
-      // Refresh whatever screen is open so new attendance shows for team building
-      try{if(typeof renderAtt==='function')renderAtt();}catch(e){}
+      // Refresh ONLY the attendance screen. Never re-render the production ('sup')
+      // screen from here — it would reset the selected team & wipe inputs mid-entry.
       const _sid=(document.querySelector('.screen.active')||{}).id?.replace('sc-','');
-      if(_sid) try{go(_sid);}catch(e){}
+      if(_sid==='att'){ try{renderAtt();}catch(e){} }
     },err=>{if(!navigator.onLine)updateSyncDot('err');}));
   }
 
