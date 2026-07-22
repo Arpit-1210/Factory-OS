@@ -45,7 +45,7 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
           <span style="margin-left:6px">→</span>
         </button>
         <div class="login-error" id="login-error">❌ Wrong email or password.</div>
-        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.4.0</div>
+        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.5.0</div>
 
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:9px;color:var(--text4);margin-bottom:8px;text-align:center">ENTERING DATA FOR A PAST DATE?</div>
@@ -1280,6 +1280,16 @@ function onLoginSuccess(displayName){
   el.className='role-tag '+currentRole;
   if(!loginDate || loginDate===todayStr()) checkDayRollover();
   updateSidebarForRole();
+  // CRITICAL: attach live listeners NOW that the role is known.
+  // (initFirebase ran before login with currentRole=null, so no listeners were attached.)
+  if(fbEnabled && db){
+    pullFromFirebase().then(function(){
+      startFirebaseSync();
+      try{renderDashboard();}catch(e){}
+      var _sid=(document.querySelector('.screen.active')||{}).id;
+      if(_sid) try{go(_sid.replace('sc-',''));}catch(e){}
+    });
+  }
   renderDashboard();
   go(ROLE_HOME[currentRole]);
 }
