@@ -45,7 +45,7 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
           <span style="margin-left:6px">→</span>
         </button>
         <div class="login-error" id="login-error">❌ Wrong email or password.</div>
-        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.6.0</div>
+        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.7.0</div>
 
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:9px;color:var(--text4);margin-bottom:8px;text-align:center">ENTERING DATA FOR A PAST DATE?</div>
@@ -2573,10 +2573,22 @@ function swTogTeam(id){
 function swFill(){const sel=document.getElementById('sw-prod');const opt=sel.options[sel.selectedIndex];const p=opt?.dataset?.price||'';document.getElementById('sw-price').value=p;document.getElementById('sw-ph').textContent=p?`Catalogue: ${fmt(parseFloat(p))}/unit`:''}
 
 function logProd(){
-  const sess=S.sessions.find(ss=>ss.supId===activeSupId);
-  if(!sess||activeTeamId===null){alert('Please select a team first.');return;}
-  const team=sess.teams.find(t=>t.teamId===activeTeamId);
-  if(!team){alert('Team not found.');return;}
+  let sess=S.sessions.find(ss=>ss.supId===activeSupId);
+  // Self-heal: if a background sync wiped the session while this screen was open, rebuild it
+  if(!sess && activeSupId){
+    const sup=S.lab.find(l=>l.id===activeSupId);
+    sess={supId:activeSupId,supName:sup?sup.name:'',date:S.workDate||todayStr(),teams:[]};
+    S.sessions.push(sess);
+  }
+  if(!sess){alert('Please select a team first.');return;}
+  if(!sess.teams) sess.teams=[];
+  let team=(activeTeamId!==null)?sess.teams.find(t=>t.teamId===activeTeamId):null;
+  // If the selected team vanished but exactly one team exists, use it; if none exist, rebuild from the on-screen UI state
+  if(!team && sess.teams.length===1){team=sess.teams[0];activeTeamId=team.teamId;}
+  if(!team){
+    team={teamId:(sess.teams.reduce((m,t)=>Math.max(m,t.teamId||0),0)+1),stage:'Moulding',team:[],production:[]};
+    sess.teams.push(team);activeTeamId=team.teamId;
+  }
   const sel=document.getElementById('sw-prod');
   const fg=S.fg.find(f=>f.id===parseInt(sel.value));
   const qty=parseFloat(document.getElementById('sw-qty').value)||0;
@@ -5324,9 +5336,16 @@ if('serviceWorker' in navigator){
 
 // ── DAY ROLLOVER ──
 // Adopt a new work date: clear day-specific data, reset attendance
+function isDaySaved(d){
+  return !!(d && ((S.ledger||[]).some(function(e){return e.date===d;}) || localStorage.getItem('_day_cleared_'+d)));
+}
 function adoptWorkDate(newDate, savedDate){
   if(savedDate) localStorage.setItem('_day_cleared_'+savedDate,'1');
-  S.sessions=[]; S.rawLog=[];
+  // Drop only sessions from days already saved; carry unsaved in-progress work to the new date
+  S.sessions=(S.sessions||[]).filter(function(s){return !isDaySaved(s.date);});
+  S.sessions.forEach(function(s){s.date=newDate;});
+  S.rawLog=(S.rawLog||[]).filter(function(r){return !isDaySaved(r.date);});
+  S.rawLog.forEach(function(r){r.date=newDate;});
   (S.lab||[]).forEach(function(l){l.present=false;l.doingOT=false;l.otHours=0;});
   S.workDate=newDate;
   var wd=document.getElementById('work-date'); if(wd) wd.value=newDate;
@@ -5340,7 +5359,7 @@ function checkDayRollover(){
   if(!S||!S.workDate) return;
   // Prune leftover sessions/rawLog from days already saved (safe: they live in the ledger)
   var pruned=false;
-  var isDone=function(d){return d && d!==S.workDate && ((S.ledger||[]).some(function(e){return e.date===d;}) || localStorage.getItem('_day_cleared_'+d));};
+  var isDone=function(d){return d && d!==S.workDate && isDaySaved(d);};
   if((S.sessions||[]).some(function(s){return isDone(s.date);})){ S.sessions=S.sessions.filter(function(s){return !isDone(s.date);}); pruned=true; }
   if((S.rawLog||[]).some(function(r){return isDone(r.date);})){ S.rawLog=S.rawLog.filter(function(r){return !isDone(r.date);}); pruned=true; }
   if(pruned){
