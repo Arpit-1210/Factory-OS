@@ -45,7 +45,7 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
           <span style="margin-left:6px">→</span>
         </button>
         <div class="login-error" id="login-error">❌ Wrong email or password.</div>
-        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.2.0</div>
+        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.4.0</div>
 
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:9px;color:var(--text4);margin-bottom:8px;text-align:center">ENTERING DATA FOR A PAST DATE?</div>
@@ -1880,7 +1880,10 @@ async function pushToFirebase(){
     };
 
     if(role==='supervisor'){
-      // Always include sessions and fgTransfers
+      // Don't re-push sessions for a day that was already saved & cleared
+      if(localStorage.getItem('_day_cleared_'+(S.workDate||''))){
+        S.sessions=[]; S.rawLog=[];
+      }
       payload.sessions = S.sessions||[];
       payload.fgTransfers = S.fgTransfers||[];
       payload.rawLog = S.rawLog||[];
@@ -5325,6 +5328,17 @@ function adoptWorkDate(newDate, savedDate){
 // Auto-advance if our workDate is in the past AND that day was already saved
 function checkDayRollover(){
   if(!S||!S.workDate) return;
+  // Prune leftover sessions/rawLog from days already saved (safe: they live in the ledger)
+  var pruned=false;
+  var isDone=function(d){return d && d!==S.workDate && ((S.ledger||[]).some(function(e){return e.date===d;}) || localStorage.getItem('_day_cleared_'+d));};
+  if((S.sessions||[]).some(function(s){return isDone(s.date);})){ S.sessions=S.sessions.filter(function(s){return !isDone(s.date);}); pruned=true; }
+  if((S.rawLog||[]).some(function(r){return isDone(r.date);})){ S.rawLog=S.rawLog.filter(function(r){return !isDone(r.date);}); pruned=true; }
+  if(pruned){
+    try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
+    try{renderDashboard();}catch(e){}
+    var _sid=(document.querySelector('.screen.active')||{}).id;
+    if(_sid) try{go(_sid.replace('sc-',''));}catch(e){}
+  }
   var today=todayStr();
   if(S.workDate>=today) return;
   var wasSaved=(S.ledger||[]).some(function(e){return e.date===S.workDate;})
@@ -5332,5 +5346,5 @@ function checkDayRollover(){
   if(wasSaved) adoptWorkDate(today);
   // If not saved: leave data alone — the day still needs to be saved manually
 }
-// Check every 5 minutes so devices left open overnight roll over by themselves
-setInterval(checkDayRollover, 5*60*1000);
+// Check every 60s so cleanup and overnight rollover happen without user action
+setInterval(checkDayRollover, 60*1000);
