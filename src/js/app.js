@@ -45,7 +45,7 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
           <span style="margin-left:6px">→</span>
         </button>
         <div class="login-error" id="login-error">❌ Wrong email or password.</div>
-        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.7.0</div>
+        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.8.0</div>
 
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:9px;color:var(--text4);margin-bottom:8px;text-align:center">ENTERING DATA FOR A PAST DATE?</div>
@@ -1952,7 +1952,7 @@ async function pullFromFirebase(){
 
 async function pullSupervisorSessions(){
   try{
-    const today=todayStr();
+    const today=S.workDate||todayStr();
     // Never restore if Save Day was clicked today
     if(localStorage.getItem('_day_cleared_'+today)){
       S.sessions=[];
@@ -2000,7 +2000,7 @@ function startFirebaseSync(){
     // Owner polls supervisor sessions every 30 seconds instead of live listener
     // This avoids any risk of overwriting
     function pollSupervisorSessions(){
-      const today=todayStr();
+      const today=S.workDate||todayStr();
       if(localStorage.getItem('_day_cleared_'+today)) return;
       db.collection('supervisors').get().then(snap=>{
         const allSessions=[];
@@ -5249,7 +5249,7 @@ window.pushAttendanceLive = pushAttendanceLive;
 // ── FIX: Pull all supervisor data for owner ──
 function pullSupervisorData(){
   if(currentRole!=='owner'||!fbEnabled||!db) return;
-  var today = todayStr();
+  var today = S.workDate||todayStr(); // compare against the WORKING day, not calendar day
   if(localStorage.getItem('_day_cleared_'+today)) return;
   db.collection('supervisors').get().then(function(snap){
     var sessions=[],rawLog=[],attMap={};
