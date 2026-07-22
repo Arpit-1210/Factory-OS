@@ -45,7 +45,7 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
           <span style="margin-left:6px">→</span>
         </button>
         <div class="login-error" id="login-error">❌ Wrong email or password.</div>
-        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.9.0</div>
+        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.10.0</div>
 
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:9px;color:var(--text4);margin-bottom:8px;text-align:center">ENTERING DATA FOR A PAST DATE?</div>
@@ -1890,9 +1890,10 @@ async function pushToFirebase(){
     };
 
     if(role==='supervisor'){
-      // Don't re-push sessions for a day that was already saved & cleared
+      // A stale cleared-flag for the CURRENT working day is impossible by definition
+      // (if the day were saved, workDate would have advanced) — remove it, never wipe data
       if(localStorage.getItem('_day_cleared_'+(S.workDate||''))){
-        S.sessions=[]; S.rawLog=[];
+        localStorage.removeItem('_day_cleared_'+S.workDate);
       }
       payload.sessions = S.sessions||[];
       payload.fgTransfers = S.fgTransfers||[];
@@ -2000,7 +2001,7 @@ function startFirebaseSync(){
     // Owner listens LIVE to all supervisor docs — production appears instantly
     unsubs.push(db.collection('supervisors').onSnapshot(snap=>{
       const today=S.workDate||todayStr();
-      if(localStorage.getItem('_day_cleared_'+today)) return;
+      if(isDaySaved(today)) return;
       const allSessions=[],allRaw=[];
       snap.forEach(doc=>{
         const data=doc.data();
@@ -5273,7 +5274,7 @@ window.pushAttendanceLive = pushAttendanceLive;
 function pullSupervisorData(){
   if(currentRole!=='owner'||!fbEnabled||!db) return;
   var today = S.workDate||todayStr(); // compare against the WORKING day, not calendar day
-  if(localStorage.getItem('_day_cleared_'+today)) return;
+  if(isDaySaved(today)) return;
   db.collection('supervisors').get().then(function(snap){
     var sessions=[],rawLog=[],attMap={};
     snap.forEach(function(doc){
@@ -5360,6 +5361,11 @@ if('serviceWorker' in navigator){
 // ── DAY ROLLOVER ──
 // Adopt a new work date: clear day-specific data, reset attendance
 function isDaySaved(d){
+  if(d && S.workDate && d===S.workDate){
+    // current working day can never be "already saved" — clean any stale flag from testing
+    if(localStorage.getItem('_day_cleared_'+d)) localStorage.removeItem('_day_cleared_'+d);
+    return false;
+  }
   return !!(d && ((S.ledger||[]).some(function(e){return e.date===d;}) || localStorage.getItem('_day_cleared_'+d)));
 }
 function adoptWorkDate(newDate, savedDate){
