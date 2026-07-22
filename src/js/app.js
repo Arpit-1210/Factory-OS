@@ -45,7 +45,7 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
           <span style="margin-left:6px">→</span>
         </button>
         <div class="login-error" id="login-error">❌ Wrong email or password.</div>
-        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.1.0</div>
+        <div style="text-align:center;margin-top:8px;font-family:var(--mono);font-size:9px;color:var(--text4)">v2.2.0</div>
 
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:9px;color:var(--text4);margin-bottom:8px;text-align:center">ENTERING DATA FOR A PAST DATE?</div>
@@ -1278,6 +1278,7 @@ function onLoginSuccess(displayName){
   const el=document.getElementById('role-tag');
   el.textContent=(displayName?displayName+' · ':'')+tags[currentRole];
   el.className='role-tag '+currentRole;
+  if(!loginDate || loginDate===todayStr()) checkDayRollover();
   updateSidebarForRole();
   renderDashboard();
   go(ROLE_HOME[currentRole]);
@@ -1970,6 +1971,9 @@ function startFirebaseSync(){
       unsubs.push(db.doc(path).onSnapshot(snap=>{
         if(!snap.exists||Date.now()-_lastLocalWrite<5000) return;
         const data=snap.data();if(!data) return;
+        if(path==='factory/shared' && data._workDate && S.workDate && data._workDate>S.workDate){
+          adoptWorkDate(data._workDate, data._savedDate);
+        }
         Object.keys(data).filter(k=>!k.startsWith('_')&&k!=='sessions'&&k!=='rawLog').forEach(k=>{
           if(data[k]!==undefined) S[k]=data[k];
         });
@@ -2013,6 +2017,9 @@ function startFirebaseSync(){
     unsubs.push(db.doc('factory/shared').onSnapshot(snap=>{
       if(!snap.exists) return; // no _lastLocalWrite guard: supervisors never write lab/fg/rm, so owner updates must always apply
       const data=snap.data();if(!data) return;
+      if(data._workDate && S.workDate && data._workDate>S.workDate){
+        adoptWorkDate(data._workDate, data._savedDate);
+      }
       // Only update catalogue data — never sessions/rawLog
       ['fg','lab','rm'].forEach(k=>{if(data[k]!==undefined)S[k]=data[k];});
       localStorage.setItem(LS_KEY,JSON.stringify(S));
@@ -2029,6 +2036,9 @@ function startFirebaseSync(){
     unsubs.push(db.doc('factory/shared').onSnapshot(snap=>{
       if(!snap.exists||Date.now()-_lastLocalWrite<5000) return;
       const data=snap.data();if(!data) return;
+      if(data._workDate && S.workDate && data._workDate>S.workDate){
+        adoptWorkDate(data._workDate, data._savedDate);
+      }
       ['fg','lab','rm','fgStock','fgTransfers'].forEach(k=>{if(data[k]!==undefined)S[k]=data[k];});
       localStorage.setItem(LS_KEY,JSON.stringify(S));
       updateSyncDot('ok');
@@ -2817,6 +2827,22 @@ function saveDay(){
       _dayCleared: true,
       _savedDate: savedDate
     }, {merge:false});
+  }
+
+  // Owner saves day → broadcast rollover to ALL devices via shared doc
+  if(fbEnabled && db && currentRole==='owner'){
+    db.doc('factory/shared').set({
+      _workDate: nextStr,
+      _savedDate: savedDate,
+      lab: S.lab, // attendance reset for new day
+      _updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    },{merge:true}).catch(function(e){console.warn('rollover broadcast:',e);});
+    // Also clear all supervisor session docs for the new day
+    db.collection('supervisors').get().then(function(snap){
+      snap.forEach(function(doc){
+        doc.ref.set({sessions:[],rawLog:[],_date:nextStr,_dayCleared:false,_savedDate:savedDate},{merge:true});
+      });
+    }).catch(function(){});
   }
 
   setTimeout(()=>{
@@ -5281,3 +5307,30 @@ if('serviceWorker' in navigator){
     }
   }).catch(function(){});
 }
+
+
+// ── DAY ROLLOVER ──
+// Adopt a new work date: clear day-specific data, reset attendance
+function adoptWorkDate(newDate, savedDate){
+  if(savedDate) localStorage.setItem('_day_cleared_'+savedDate,'1');
+  S.sessions=[]; S.rawLog=[];
+  (S.lab||[]).forEach(function(l){l.present=false;l.doingOT=false;l.otHours=0;});
+  S.workDate=newDate;
+  var wd=document.getElementById('work-date'); if(wd) wd.value=newDate;
+  try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
+  try{renderDashboard();}catch(e){}
+  var sid=(document.querySelector('.screen.active')||{}).id;
+  if(sid) try{go(sid.replace('sc-',''));}catch(e){}
+}
+// Auto-advance if our workDate is in the past AND that day was already saved
+function checkDayRollover(){
+  if(!S||!S.workDate) return;
+  var today=todayStr();
+  if(S.workDate>=today) return;
+  var wasSaved=(S.ledger||[]).some(function(e){return e.date===S.workDate;})
+    || localStorage.getItem('_day_cleared_'+S.workDate);
+  if(wasSaved) adoptWorkDate(today);
+  // If not saved: leave data alone — the day still needs to be saved manually
+}
+// Check every 5 minutes so devices left open overnight roll over by themselves
+setInterval(checkDayRollover, 5*60*1000);
