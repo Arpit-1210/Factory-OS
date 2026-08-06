@@ -1237,22 +1237,21 @@ function onLoginSuccess(displayName){
 
   document.getElementById('login-page').style.display='none';
   document.getElementById('app-shell').style.display='flex';
-  if(typeof firebase !== 'undefined' && !fbEnabled) initFirebase();
   const tags={owner:'👨‍💼 Owner',supervisor:'👷 Supervisor',rm:'🧪 RM Supervisor'};
   const el=document.getElementById('role-tag');
   el.textContent=(displayName?displayName+' · ':'')+tags[currentRole];
   el.className='role-tag '+currentRole;
   if(!loginDate || loginDate===todayStr()) checkDayRollover();
   updateSidebarForRole();
-  // CRITICAL: attach live listeners NOW that the role is known.
-  // (initFirebase ran before login with currentRole=null, so no listeners were attached.)
-  if(fbEnabled && db){
+  // Attach realtime subscriptions now that the role is known — init runs
+  // before login with currentRole=null, so nothing was subscribed yet.
+  if(fbEnabled){
     pullFromFirebase().then(function(){
       startFirebaseSync();
       try{renderDashboard();}catch(e){}
       var _sid=(document.querySelector('.screen.active')||{}).id;
       if(_sid) try{go(_sid.replace('sc-',''));}catch(e){}
-    });
+    }).catch(function(e){ console.error('initial sync:', e); });
   }
   renderDashboard();
   go(ROLE_HOME[currentRole]);
@@ -1678,377 +1677,142 @@ function orderStatusColor(s){return s==='pending'?'#92400E':s==='production'?'#1
 function orderStatusBg(s){return s==='pending'?'var(--amber-l)':s==='production'?'var(--blue-l)':s==='ready'?'var(--jade-l)':'var(--surface2)';}
 
 // ── FIREBASE ──
-const FB_CONFIG = {
-  apiKey: "AIzaSyBoGZtUxjPekDE5_U7yiWSC7C55N-AkNsQ",
-  authDomain: "frp-factory-3e933.firebaseapp.com",
-  projectId: "frp-factory-3e933",
-  storageBucket: "frp-factory-3e933.firebasestorage.app",
-  messagingSenderId: "842971949999",
-  appId: "1:842971949999:web:0263ae517f057288341d5a"
-};
+// ══════════════════════════════════════════════════════════════════
+//  CLOUD SYNC — Supabase   (implementation: src/js/supabase-db.js)
+//
+//  The function NAMES below are unchanged from the old Firebase layer
+//  on purpose: ~40 call sites across app.js keep working untouched.
+//  Only the implementation moved.
+//
+//  Gone, and why:
+//    _lastLocalWrite echo guard  — writes are row-level now, no echo
+//    30s supervisor poll         — Postgres realtime replaces it
+//    de-dup by supId             — sessions are rows, not an array
+//    _currentSupDocId            — identity is the auth user, not a
+//                                  random id in localStorage
+// ══════════════════════════════════════════════════════════════════
 
-let fbApp = null;
-let db = null;
-let fbEnabled = false;
-let fbUnsubscribe = null;
-// factory docs: factory/owner, factory/supervisor, factory/rm, factory/shared
+let fbEnabled = false;   // true once FactoryDB has initialised
+let db = null;           // Supabase client; kept for legacy truthiness checks
 
-// ── HANDLE TAB VISIBILITY ──
-// When tab goes to background, Firebase disconnects — don't show as offline
+// ── TAB VISIBILITY ──
+// Background tabs drop the realtime socket. Don't flash "Offline" at the
+// user for that — only a genuine network loss sets the error state.
 document.addEventListener('visibilitychange', function(){
   if(document.hidden){
-    // Tab hidden — keep showing last known state, not offline
     const dot = document.getElementById('sync-status');
     const txt = document.getElementById('sync-text');
-    if(dot && dot.className.includes('err')){
-      // Was already error — keep showing
-    } else {
-      // Was ok/syncing — show as synced even though tab is hidden
-      if(dot) dot.className = 'sync-dot ok';
+    if(dot && !dot.className.includes('err')){
+      dot.className = 'sync-dot ok';
       if(txt) txt.textContent = 'Synced';
     }
-  } else {
-    // Tab visible again — reconnect
-    if(fbEnabled && db){
-      updateSyncDot('syncing');
-      // Force a quick push to reconnect
-      setTimeout(()=>{ pushToFirebase(); }, 1000);
-    }
+  } else if(fbEnabled){
+    updateSyncDot('syncing');
+    FactoryDB.flushOutbox();
+    setTimeout(function(){ pushToFirebase(); }, 800);
   }
 });
-
-function initFirebase(){
-  try{
-    if(!firebase.apps.length){
-      fbApp = firebase.initializeApp(FB_CONFIG);
-    } else {
-      fbApp = firebase.apps[0];
-    }
-    db = firebase.firestore();
-
-    // ── OFFLINE PERSISTENCE ──
-    try{
-      db.enablePersistence({synchronizeTabs:true})
-        .catch(err=>{
-          if(err.code==='failed-precondition') console.warn('Multiple tabs — persistence limited');
-          else if(err.code==='unimplemented') console.warn('Browser offline persistence not supported');
-        });
-    }catch(e){ console.warn('Persistence setup:', e); }
-
-    fbEnabled = true;
-    console.log('Firebase connected');
-    updateSyncDot('syncing');
-    // Only show offline when device actually has no internet
-    window.addEventListener('online', ()=>{ updateSyncDot('syncing'); setTimeout(pushToFirebase,1000); });
-    window.addEventListener('offline', ()=>{ updateSyncDot('err'); });
-
-    // Pull ALL data from Firebase first, then start listening
-    pullFromFirebase().then(()=>{
-      updateSyncDot('ok');
-      startFirebaseSync();
-      scheduleAutoBackup();
-      // Supervisor/RM pushes their data immediately on connect
-      if(currentRole==='supervisor'||currentRole==='rm'){
-        setTimeout(pushToFirebase, 1500);
-      }
-      try{ renderHome(); renderDashboard(); }catch(e){}
-    });
-
-  } catch(e){
-    console.error('Firebase init error:', e);
-    fbEnabled = false;
-    updateSyncDot('err');
-  }
-}
-
-// ── AUTO DAILY BACKUP ──
-let _backupTimer = null;
-function scheduleAutoBackup(){
-  if(_backupTimer) clearTimeout(_backupTimer);
-  const now = new Date();
-  const midnight = new Date(now);
-  midnight.setHours(24,0,0,0);
-  const msToMidnight = midnight - now;
-  _backupTimer = setTimeout(()=>{
-    runDailyBackup();
-    // Clear supervisor Firebase doc at midnight — new day starts fresh
-    if(fbEnabled&&db&&currentRole==='supervisor'){
-      db.doc(getMyFirebaseDoc()).set({
-        sessions:[],rawLog:[],fgTransfers:[],
-        _updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
-        _updatedBy:'supervisor',
-        _date:todayStr(),
-        _dayCleared:true
-      },{merge:false});
-    }
-    setInterval(runDailyBackup, 24*60*60*1000);
-  }, msToMidnight);
-  console.log('Auto backup scheduled in', Math.round(msToMidnight/60000), 'minutes');
-}
-
-async function runDailyBackup(){
-  if(!fbEnabled||!db) return;
-  try{
-    const today = todayStr();
-    await db.collection('backups').doc(today).set({
-      ...S,
-      _backedUpAt: firebase.firestore.FieldValue.serverTimestamp(),
-      _date: today
-    });
-    console.log('Daily backup saved:', today);
-    // Cleanup backups older than 30 days
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate()-30);
-    const cutoffStr = cutoff.toISOString().slice(0,10);
-    const old = await db.collection('backups').where('_date','<',cutoffStr).get();
-    old.forEach(doc=>doc.ref.delete());
-  }catch(e){ console.error('Backup failed:',e); }
-}
 
 function updateSyncDot(status){
   const dot = document.getElementById('sync-status');
   const txt = document.getElementById('sync-text');
   if(dot) dot.className = 'sync-dot ' + status;
-  if(txt) txt.textContent = status==='ok'?'Firebase synced':status==='syncing'?'Syncing...':'Offline';
+  if(txt){
+    const pending = (typeof FactoryDB!=='undefined') ? FactoryDB.pendingWrites() : 0;
+    txt.textContent = status==='ok'      ? 'Synced'
+                    : status==='syncing' ? 'Syncing...'
+                    : pending            ? pending+' unsynced'
+                                         : 'Offline';
+  }
 }
 
-// Push local state to Firebase
-// ── FIREBASE SYNC — Role-based subcollections ──
-const ROLE_WRITE_KEYS = {
-  owner: ['orders','ledger','dispatches','salaryAdj','bom','unitTransfers','fgAdjustments'],
-  supervisor: ['sessions','fgTransfers'],
-  rm: ['stock','purchases','rawLog','fgStock'],
-};
-
-let _isSyncing = false;
-let _lastLocalWrite = 0;
-let _currentSupDocId = null; // unique doc per supervisor device
-
-function getMyFirebaseDoc(){
-  if(currentRole==='supervisor'){
-    if(!_currentSupDocId){
-      // Create stable ID from browser — persisted in localStorage
-      let devId = localStorage.getItem('_sup_device_id');
-      if(!devId){
-        devId = 'sup_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,6);
-        localStorage.setItem('_sup_device_id', devId);
-      }
-      _currentSupDocId = devId;
-    }
-    return 'supervisors/'+_currentSupDocId;
+async function initFirebase(){
+  if(typeof FactoryDB === 'undefined'){
+    console.error('supabase-db.js not loaded');
+    updateSyncDot('err');
+    return false;
   }
-  if(currentRole==='rm') return 'factory/rm';
-  return 'factory/owner';
+  const ok = await FactoryDB.init();
+  fbEnabled = ok;
+  db = ok ? FactoryDB.client() : null;
+  window.db = db;
+  window.fbEnabled = fbEnabled;
+  if(!ok){ updateSyncDot('err'); return false; }
+
+  console.log('Supabase connected');
+  updateSyncDot('syncing');
+
+  window.addEventListener('online',  function(){ updateSyncDot('syncing'); FactoryDB.flushOutbox(); });
+  window.addEventListener('offline', function(){ updateSyncDot('err'); });
+
+  // Replay anything queued while offline before pulling fresh state,
+  // otherwise a pull would overwrite unsent local work.
+  await FactoryDB.flushOutbox();
+
+  if(currentRole){
+    await pullFromFirebase();
+    startFirebaseSync();
+    try{ renderHome(); renderDashboard(); }catch(e){}
+  }
+  updateSyncDot('ok');
+  return true;
 }
 
 async function pushToFirebase(){
-  if(!fbEnabled||!db||_isSyncing) return;
-  _isSyncing = true;
-  _lastLocalWrite = Date.now();
-  updateSyncDot('syncing');
-  try{
-    const role = currentRole||'owner';
-    const docPath = getMyFirebaseDoc();
-    const payload = {
-      _updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      _updatedBy: role,
-      _date: S.workDate||todayStr()
-    };
-
-    if(role==='supervisor'){
-      // A stale cleared-flag for the CURRENT working day is impossible by definition
-      // (if the day were saved, workDate would have advanced) — remove it, never wipe data
-      if(localStorage.getItem('_day_cleared_'+(S.workDate||''))){
-        localStorage.removeItem('_day_cleared_'+S.workDate);
-      }
-      payload.sessions = S.sessions||[];
-      payload.fgTransfers = S.fgTransfers||[];
-      payload.rawLog = S.rawLog||[];
-    } else if(role==='rm'){
-      payload.stock = S.stock||[];
-      payload.purchases = S.purchases||[];
-      payload.rawLog = S.rawLog||[];
-      payload.fgStock = S.fgStock||{};
-    } else {
-      // Owner
-      const writeKeys = ['orders','ledger','dispatches','salaryAdj','bom','unitTransfers','fgAdjustments'];
-      writeKeys.forEach(k=>{if(S[k]!==undefined)payload[k]=S[k];});
-      // Owner also writes shared catalogue
-      await db.doc('factory/shared').set({
-        fg:S.fg, lab:S.lab, rm:S.rm,
-        fgStock:S.fgStock, fgTransfers:S.fgTransfers,
-        orderReservations:S.orderReservations||[],
-        _updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-      },{merge:true});
-    }
-
-    await db.doc(docPath).set(payload, {merge:true});
-    updateSyncDot('ok');
-    console.log('Pushed to:', docPath, 'sessions:', (payload.sessions||[]).length);
-  }catch(e){
-    console.error('Firebase push:',e);
-    // Only show error dot if actually offline
-    if(!navigator.onLine) updateSyncDot('err');
-    else updateSyncDot('ok'); // push failed but we're online - keep showing ok
-  }
-  finally{_isSyncing=false;}
+  if(!fbEnabled || !currentRole) return;
+  await FactoryDB.push(S, currentRole);
 }
 
 async function pullFromFirebase(){
-  if(!fbEnabled||!db) return;
-  try{
-    // Pull owner + rm + shared data (never pull sessions from any supervisor doc)
-    const paths=['factory/main','factory/owner','factory/rm','factory/shared'];
-    const docs = await Promise.all(paths.map(p=>db.doc(p).get().catch(()=>null)));
-    docs.forEach(snap=>{
-      if(!snap||!snap.exists) return;
-      const data=snap.data();
-      // Never pull sessions or rawLog — these belong to supervisor devices only
-      Object.keys(data).filter(k=>!k.startsWith('_')&&k!=='sessions'&&k!=='rawLog').forEach(k=>{
-        if(data[k]!==undefined) S[k]=data[k];
-      });
-    });
-    // If owner, also pull all supervisor sessions to show on dashboard
-    if(currentRole==='owner'){
-      await pullSupervisorSessions();
-    }
-    localStorage.setItem(LS_KEY, JSON.stringify(S));
-    console.log('Firebase pull OK');
-  }catch(e){console.error('Firebase pull:',e);}
+  if(!fbEnabled) return;
+  await FactoryDB.pull(S);
+  window.S = S;
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
 }
 
-async function pullSupervisorSessions(){
-  try{
-    const today=S.workDate||todayStr();
-    // Never restore if Save Day was clicked today
-    if(localStorage.getItem('_day_cleared_'+today)){
-      S.sessions=[];
-      return;
-    }
-    const supSnaps=await db.collection('supervisors').get();
-    const allSessions=[];
-    supSnaps.forEach(doc=>{
-      const data=doc.data();
-      if(data._date===today&&!data._dayCleared&&data.sessions&&data.sessions.length>0){
-        data.sessions.forEach(ss=>{
-          if(!allSessions.find(x=>x.supId===ss.supId)) allSessions.push(ss);
-        });
-      }
-    });
-    if(allSessions.length>0) S.sessions=allSessions;
-    else S.sessions=[];
-  }catch(e){console.error('pullSupervisorSessions:',e);}
-}
+// The owner's view of supervisor sessions is now just a pull. The manual
+// merge and de-duplication this used to do is gone — sessions are rows,
+// and RLS stops one supervisor from touching another's.
+async function pullSupervisorSessions(){ return pullFromFirebase(); }
+async function pullSupervisorData(){ return pullFromFirebase(); }
 
 function startFirebaseSync(){
-  if(!fbEnabled||!db) return;
-  if(fbUnsubscribe) fbUnsubscribe();
-  const unsubs = [];
-
-  // 1. Owner listens to owner doc + shared + rm
-  if(currentRole==='owner'){
-    ['factory/owner','factory/shared','factory/rm'].forEach(path=>{
-      unsubs.push(db.doc(path).onSnapshot(snap=>{
-        if(!snap.exists||Date.now()-_lastLocalWrite<5000) return;
-        const data=snap.data();if(!data) return;
-        if(path==='factory/shared' && data._workDate && S.workDate && data._workDate>S.workDate){
-          adoptWorkDate(data._workDate, data._savedDate);
-        }
-        Object.keys(data).filter(k=>!k.startsWith('_')&&k!=='sessions'&&k!=='rawLog').forEach(k=>{
-          if(data[k]!==undefined) S[k]=data[k];
-        });
-        localStorage.setItem(LS_KEY,JSON.stringify(S));
-        updateSyncDot('ok');
-        const sid=(document.querySelector('.screen.active')||{}).id?.replace('sc-','');
-        if(['orders','payments','month','salary','dispatch','att','dashboard'].includes(sid)) try{go(sid);}catch(e){}
-      },err=>{if(!navigator.onLine)updateSyncDot('err');}));
-    });
-
-    // Owner listens LIVE to all supervisor docs — production appears instantly
-    unsubs.push(db.collection('supervisors').onSnapshot(snap=>{
-      const today=S.workDate||todayStr();
-      if(isDaySaved(today)) return;
-      const allSessions=[],allRaw=[];
-      snap.forEach(doc=>{
-        const data=doc.data();
-        if(data._date===today&&!data._dayCleared){
-          (data.sessions||[]).forEach(ss=>{if(!allSessions.find(x=>x.supId===ss.supId))allSessions.push(ss);});
-          (data.rawLog||[]).forEach(r=>{if(!allRaw.find(x=>x.id===r.id))allRaw.push(r);});
-        }
-      });
-      let changed=false;
-      if(allSessions.length>0&&JSON.stringify(allSessions)!==JSON.stringify(S.sessions||[])){S.sessions=allSessions;changed=true;}
-      if(allRaw.length>0&&JSON.stringify(allRaw)!==JSON.stringify(S.rawLog||[])){S.rawLog=allRaw;changed=true;}
-      if(changed){
-        localStorage.setItem(LS_KEY,JSON.stringify(S));
-        updateSyncDot('ok');
-        try{renderDashboard();}catch(e){}
-        const sid=(document.querySelector('.screen.active')||{}).id?.replace('sc-','');
-        if(['dashboard','day','raw','month'].includes(sid)) try{go(sid);}catch(e){}
-      }
-    },err=>{if(!navigator.onLine)updateSyncDot('err');}));
-
-    // Backup poll every 30 seconds (kept as safety net)
-    function pollSupervisorSessions(){
-      const today=S.workDate||todayStr();
-      if(localStorage.getItem('_day_cleared_'+today)) return;
-      db.collection('supervisors').get().then(snap=>{
-        const allSessions=[];
-        snap.forEach(doc=>{
-          const data=doc.data();
-          if(data._date===today&&!data._dayCleared&&data.sessions&&data.sessions.length>0){
-            data.sessions.forEach(ss=>{
-              if(!allSessions.find(x=>x.supId===ss.supId)) allSessions.push(ss);
-            });
-          }
-        });
-        if(allSessions.length>0){
-          S.sessions=allSessions;
-          localStorage.setItem(LS_KEY,JSON.stringify(S));
-          try{renderDashboard();}catch(e){}
-        }
-      }).catch(()=>{});
+  if(!fbEnabled || !currentRole) return;
+  FactoryDB.startSync(S, currentRole, function(state){
+    S = state;
+    window.S = S;
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
+    updateSyncDot('ok');
+    try{ renderDashboard(); }catch(e){}
+    // Never re-render the production ('sup') screen from a remote event:
+    // it would reset the selected team and wipe inputs mid-entry.
+    const sid = (document.querySelector('.screen.active')||{}).id;
+    if(sid && sid !== 'sc-sup'){
+      try{ go(sid.replace('sc-','')); }catch(e){}
     }
-    // Poll every 30 seconds
-    pollSupervisorSessions();
-    const pollInterval = setInterval(pollSupervisorSessions, 30000);
-    unsubs.push(()=>clearInterval(pollInterval));
-  }
+  });
+}
 
-  // 2. Supervisor listens ONLY to shared (catalogue updates) — never to other supervisor docs
-  if(currentRole==='supervisor'){
-    unsubs.push(db.doc('factory/shared').onSnapshot(snap=>{
-      if(!snap.exists) return; // no _lastLocalWrite guard: supervisors never write lab/fg/rm, so owner updates must always apply
-      const data=snap.data();if(!data) return;
-      if(data._workDate && S.workDate && data._workDate>S.workDate){
-        adoptWorkDate(data._workDate, data._savedDate);
-      }
-      // Only update catalogue data — never sessions/rawLog
-      ['fg','lab','rm'].forEach(k=>{if(data[k]!==undefined)S[k]=data[k];});
-      localStorage.setItem(LS_KEY,JSON.stringify(S));
-      updateSyncDot('ok');
-      // Refresh ONLY the attendance screen. Never re-render the production ('sup')
-      // screen from here — it would reset the selected team & wipe inputs mid-entry.
-      const _sid=(document.querySelector('.screen.active')||{}).id?.replace('sc-','');
-      if(_sid==='att'){ try{renderAtt();}catch(e){} }
-    },err=>{if(!navigator.onLine)updateSyncDot('err');}));
-  }
+function stopFirebaseSync(){
+  if(fbEnabled) FactoryDB.stopSync();
+}
 
-  // 3. RM supervisor listens to shared only
-  if(currentRole==='rm'){
-    unsubs.push(db.doc('factory/shared').onSnapshot(snap=>{
-      if(!snap.exists||Date.now()-_lastLocalWrite<5000) return;
-      const data=snap.data();if(!data) return;
-      if(data._workDate && S.workDate && data._workDate>S.workDate){
-        adoptWorkDate(data._workDate, data._savedDate);
-      }
-      ['fg','lab','rm','fgStock','fgTransfers'].forEach(k=>{if(data[k]!==undefined)S[k]=data[k];});
-      localStorage.setItem(LS_KEY,JSON.stringify(S));
-      updateSyncDot('ok');
-    },err=>{if(!navigator.onLine)updateSyncDot('err');}));
-  }
+// Daily backups are Postgres point-in-time recovery now. The old version
+// wrote the ENTIRE app state into one document per day, which was on
+// course to breach Firestore's 1 MiB limit as the ledger grew.
+function scheduleAutoBackup(){ /* no-op — Supabase handles backups */ }
 
-  fbUnsubscribe=()=>unsubs.forEach(u=>typeof u==='function'&&u());
+async function runDailyBackup(){
+  if(!fbEnabled) return;
+  await FactoryDB.saveDay(S.workDate||todayStr(), buildPayload());
+  console.log('Day snapshot saved:', S.workDate);
+}
+
+// Attendance changes push immediately rather than waiting for the 2s
+// persist() debounce, so the owner's marks reach supervisors live.
+function pushAttendanceLive(){
+  if(!fbEnabled) return;
+  pushToFirebase();
 }
 
 function persist(){
@@ -2839,32 +2603,17 @@ function saveDay(){
   if(wdEl) wdEl.value = nextStr;
   persist();
 
-  // Clear Firebase supervisor doc
-  if(fbEnabled && db && currentRole==='supervisor'){
-    db.doc(getMyFirebaseDoc()).set({
-      sessions:[], rawLog:[], fgTransfers:[],
-      _updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      _updatedBy: 'supervisor',
-      _date: nextStr,
-      _dayCleared: true,
-      _savedDate: savedDate
-    }, {merge:false});
-  }
-
-  // Owner saves day → broadcast rollover to ALL devices via shared doc
-  if(fbEnabled && db && currentRole==='owner'){
-    db.doc('factory/shared').set({
-      _workDate: nextStr,
-      _savedDate: savedDate,
-      lab: S.lab, // attendance reset for new day
-      _updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    },{merge:true}).catch(function(e){console.warn('rollover broadcast:',e);});
-    // Also clear all supervisor session docs for the new day
-    db.collection('supervisors').get().then(function(snap){
-      snap.forEach(function(doc){
-        doc.ref.set({sessions:[],rawLog:[],_date:nextStr,_dayCleared:false,_savedDate:savedDate},{merge:true});
-      });
-    }).catch(function(){});
+  // Persist the closed day as one row in `day_ledger`.
+  //
+  // Nothing needs "clearing" any more. Every operational table is keyed
+  // by work_date, so the next day simply has no rows yet — which is what
+  // made the old _dayCleared flags, the supervisor doc wipes, and the
+  // rollover broadcast unnecessary. Those three mechanisms are the source
+  // of most of the day-rollover bugs in the git history.
+  if(fbEnabled){
+    FactoryDB.saveDay(savedDate, payload)
+      .then(function(){ return pushToFirebase(); })
+      .catch(function(e){ console.warn('saveDay:', e); });
   }
 
   setTimeout(()=>{
@@ -5048,7 +4797,6 @@ try{
   if(typeof initFirebase === "function") window.initFirebase = initFirebase;
   if(typeof scheduleAutoBackup === "function") window.scheduleAutoBackup = scheduleAutoBackup;
   if(typeof updateSyncDot === "function") window.updateSyncDot = updateSyncDot;
-  if(typeof getMyFirebaseDoc === "function") window.getMyFirebaseDoc = getMyFirebaseDoc;
   if(typeof startFirebaseSync === "function") window.startFirebaseSync = startFirebaseSync;
   if(typeof persist === "function") window.persist = persist;
   if(typeof uid === "function") window.uid = uid;
@@ -5201,106 +4949,20 @@ try{
   console.log('Factory OS ready');
 });
 
-// ── LOAD FIREBASE ──
-loadScript('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js', function(){
-  loadScript('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js', function(){
-    loadScript('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js', function(){
-      console.log('Firebase SDK loaded');
-      if(typeof firebase !== 'undefined' && typeof initFirebase === 'function' && !fbEnabled){
-        initFirebase();
-      } else if(typeof firebase === 'undefined'){
-        console.error('Firebase SDK failed to load — check network/CDN');
-        updateSyncDot('err');
-      }
-    });
-  });
-});
+// ── BOOT CLOUD SYNC ──
+// supabase-js and supabase-db.js are loaded by index.html before this
+// file, so the SDK is already present. No runtime CDN fetch needed.
+initFirebase();
 
 
 // ══════════════════════════════════════════════
 // ── FACTORY OS FIXES & ENHANCEMENTS ──
 // ══════════════════════════════════════════════
 
-// ── FIX: Push attendance live when supervisor marks it ──
-function pushAttendanceLive(){
-  if(!fbEnabled||!db) return;
-  // Owner marks attendance → push lab (with present flags) to shared doc immediately
-  if(currentRole==='owner'){
-    db.doc('factory/shared').set({
-      lab: S.lab,
-      _updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    },{merge:true}).catch(function(e){ console.warn('Owner att push:', e); });
-    return;
-  }
-  var devId = localStorage.getItem('_sup_device_id');
-  if(!devId) return;
-  var attData = S.lab.map(function(l){
-    return {id:l.id,name:l.name,wage:l.wage||0,present:!!l.present,doingOT:!!l.doingOT,otHours:l.otHours||0};
-  });
-  // Merge attendance into supervisor doc
-  db.doc('supervisors/'+devId).get().then(function(snap){
-    var existing = snap.exists ? snap.data() : {};
-    existing.attendance = attData;
-    existing.workersPresent = attData.filter(function(a){return a.present;}).length;
-    existing._date = (typeof S!=='undefined'&&S.workDate)||todayStr();
-    existing._updatedAt = firebase.firestore.FieldValue.serverTimestamp();
-    db.doc('supervisors/'+devId).set(existing, {merge:true}).catch(function(e){
-      console.warn('Att push:', e);
-    });
-  });
-}
-window.pushAttendanceLive = pushAttendanceLive;
-
-// ── FIX: Pull all supervisor data for owner ──
-function pullSupervisorData(){
-  if(currentRole!=='owner'||!fbEnabled||!db) return;
-  var today = S.workDate||todayStr(); // compare against the WORKING day, not calendar day
-  if(isDaySaved(today)) return;
-  db.collection('supervisors').get().then(function(snap){
-    var sessions=[],rawLog=[],attMap={};
-    snap.forEach(function(doc){
-      var d=doc.data();
-      if(d._date!==today||d._dayCleared) return;
-      (d.sessions||[]).forEach(function(ss){
-        if(!sessions.find(function(x){return x.supId===ss.supId;})) sessions.push(ss);
-      });
-      (d.rawLog||[]).forEach(function(r){
-        if(!rawLog.find(function(x){return x.id===r.id;})) rawLog.push(r);
-      });
-      (d.attendance||[]).forEach(function(a){
-        if(!attMap[a.id]||a.present) attMap[a.id]=a;
-      });
-      // Also mark team members as present from sessions
-      (d.sessions||[]).forEach(function(ss){
-        (ss.teams||[]).forEach(function(t){
-          (t.team||[]).forEach(function(m){
-            if(!attMap[m.id]) attMap[m.id]={id:m.id,name:m.name,present:true,doingOT:false,otHours:0};
-            else attMap[m.id].present=true;
-          });
-        });
-      });
-    });
-    var changed=false;
-    if(sessions.length>0 && JSON.stringify(sessions)!==JSON.stringify(S.sessions||[])){S.sessions=sessions;changed=true;}
-    if(rawLog.length>0 && JSON.stringify(rawLog)!==JSON.stringify(S.rawLog||[])){S.rawLog=rawLog;changed=true;}
-    // NOTE: owner is the source of truth for attendance — do NOT apply
-    // supervisor attendance back onto owner's lab (it would overwrite owner marks)
-    if(changed){
-      window.S=S;
-      try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
-      updateSyncDot('ok');
-      try{renderDashboard();}catch(e){}
-      var sid=(document.querySelector('.screen.active')||{}).id;
-      if(sid) try{go(sid.replace('sc-',''));}catch(e){}
-    }
-  }).catch(function(e){console.warn('pullSupervisorData:',e);});
-}
-window.pullSupervisorData = pullSupervisorData;
-
-// ── Auto-pull every 10 seconds for owner ──
-setInterval(function(){
-  if(window.currentRole==='owner') pullSupervisorData();
-}, 10000);
+// NOTE: pushAttendanceLive() and pullSupervisorData() now live in the
+// cloud-sync section above. The versions that were here merged and
+// de-duplicated supervisor documents by hand and polled every 10s.
+// Postgres realtime replaces all of it.
 
 // ── Session backup every 5 min ──
 setInterval(function(){
