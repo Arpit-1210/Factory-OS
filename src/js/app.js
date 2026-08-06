@@ -1432,7 +1432,7 @@ function renderDashboard(){
   const totalUnits = S.sessions.reduce((a,ss)=>a+(ss.teams||[]).reduce((b,t)=>b+t.production.reduce((c,p)=>c+p.qty,0),0),0);
   const totalRM = S.rawLog.reduce((a,r)=>a+r.cost,0);
   const bw = present.reduce((a,l)=>a+l.wage,0);
-  const ot = present.filter(l=>l.doingOT).reduce((a,l)=>a+Math.round((l.wage/8)*(l.ot||0)),0);
+  const ot = present.reduce((a,l)=>a+calcOT(l),0);
   const totalLab = bw+ot;
   const net = totalGoods-totalLab-totalRM;
   const packingItems = getAllFGProducts ? getAllFGProducts().filter(p=>getFGBalance(p,'Packing')>0).length : 0;
@@ -2095,6 +2095,15 @@ function persist(){
 
 function uid(){ return Date.now()+Math.floor(Math.random()*99999); }
 
+// ── OVERTIME — single source of truth ──
+// OT is paid per hour at (daily wage / 8). `otHours` is the ONLY field
+// read here. The legacy `ot` field held a flat rupee-per-day amount and
+// is no longer used in any money calculation anywhere in the app.
+function calcOT(w){
+  if(!w || !w.doingOT) return 0;
+  return Math.round(((parseFloat(w.wage)||0)/8) * (parseFloat(w.otHours)||0));
+}
+
 function fmt(n){ return '₹'+Math.round(n).toLocaleString('en-IN'); }
 
 function fmtN(n){ return Math.round(n).toLocaleString('en-IN'); }
@@ -2267,7 +2276,7 @@ function renderOTTab(){
     return;
   }
   let totalOT = 0;
-  present.forEach(l=>{ totalOT += l.doingOT ? Math.round((l.wage/8)*(l.otHours||0)) : 0; });
+  present.forEach(l=>{ totalOT += calcOT(l); });
   const otDisp = document.getElementById('ot-total-display');
   if(otDisp) otDisp.textContent = 'Total OT: ₹'+totalOT.toLocaleString('en-IN');
 
@@ -2278,7 +2287,7 @@ function renderOTTab(){
     </tr></thead>
     <tbody>${present.map(l=>{
       const hrs = l.otHours||0;
-      const otPay = l.doingOT ? Math.round((l.wage/8)*hrs) : 0;
+      const otPay = calcOT(l);
       return`<tr style="${l.doingOT?'background:var(--amber-l)':''}">
         <td style="font-weight:600">${l.name}${l.isSup?' ⭐':''}</td>
         <td style="color:var(--text3);font-size:11px">${l.role}</td>
@@ -2333,7 +2342,7 @@ function markAll(v){S.lab.forEach(l=>{l.present=!!v;if(!v){l.doingOT=false;l.otH
 function updAttMet(){
   const p=S.lab.filter(l=>l.present);
   const bw=p.reduce((a,l)=>a+l.wage,0);
-  const ot=p.filter(l=>l.doingOT).reduce((a,l)=>a+Math.round((l.wage/8)*(l.otHours||l.ot||0)),0);
+  const ot=p.reduce((a,l)=>a+calcOT(l),0);
   document.getElementById('a-tot').textContent=S.lab.length;
   document.getElementById('a-pres').textContent=p.length;
   document.getElementById('a-abs').textContent=S.lab.length-p.length;
@@ -2381,7 +2390,7 @@ function enterSup(supId){
   const sup=S.lab.find(l=>l.id===supId);activeSupId=supId;
   let sess=S.sessions.find(ss=>ss.supId===supId);
   if(!sess){
-    sess={supId,supName:sup.name,supWage:sup.wage,supOT:sup.doingOT?sup.ot:0,teams:[]};
+    sess={supId,supName:sup.name,supWage:sup.wage,supOT:calcOT(sup),teams:[]};
     S.sessions.push(sess);
   }
   // Migrate old format sessions
@@ -2392,7 +2401,7 @@ function enterSup(supId){
   document.getElementById('sup-login').style.display='none';
   document.getElementById('sup-work').style.display='block';
   document.getElementById('sw-name').textContent=sup.name;
-  document.getElementById('sw-meta').textContent=sup.role+' · '+fmt(sup.wage)+'/day'+(sup.doingOT?` + ${fmt(sup.ot)} OT`:'');
+  document.getElementById('sw-meta').textContent=sup.role+' · '+fmt(sup.wage)+'/day'+(sup.doingOT?` + ${fmt(calcOT(sup))} OT`:'');
   activeTeamId=null;
   renderSupWork();
 }
@@ -2502,7 +2511,7 @@ function renderSupTeamWork(sess, team){
   }
 
   // Labour cost
-  const lc=team.team.reduce((a,m)=>a+m.wage,0)+(team.team.reduce((a,m)=>a+(m.doingOT?m.ot:0),0));
+  const lc=team.team.reduce((a,m)=>a+m.wage,0)+(team.team.reduce((a,m)=>a+calcOT(m),0));
   document.getElementById('sw-lab-cost').textContent=team.team.length?`Team ${team.teamId} Labour: ${fmt(lc)}/day`:'';
 
   // Back button in team section
@@ -2562,7 +2571,7 @@ function renderSupTeamWork(sess, team){
   const pt=document.getElementById('sw-prod-tbl');
   if(!team.production.length){pt.innerHTML='';return;}
   const tv=team.production.reduce((a,p)=>a+p.value,0);
-  const lc2=team.team.reduce((a,m)=>a+m.wage,0)+team.team.reduce((a,m)=>a+(m.doingOT?m.ot:0),0);
+  const lc2=team.team.reduce((a,m)=>a+m.wage,0)+team.team.reduce((a,m)=>a+calcOT(m),0);
   pt.innerHTML=`<table class="tbl"><thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Wt/pc</th><th class="num">Total Wt</th><th class="num">₹/kg</th><th class="num">₹/unit</th><th class="num">Total</th><th></th></tr></thead>
   <tbody>${team.production.map((p,i)=>{const wt=p.weightPerPc||0;const tw=p.totalWeight||0;const rpkg=wt>0?Math.round(p.unitVal/wt):0;
     return`<tr><td style="font-weight:500;color:#111827">${p.name}</td><td class="num">${p.qty}</td><td class="num">${wt||'—'}</td><td class="num">${tw?fmtN(tw)+' kg':'—'}</td><td class="num" style="color:#B45309">${rpkg?fmt(rpkg):'—'}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(p.value)}</td><td><button class="btn btn-ember btn-xs" onclick="delProd(${i})">✕</button></td></tr>`;}).join('')}
@@ -2743,7 +2752,7 @@ function renderDay(){
   document.getElementById('day-title').innerHTML=d.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}).replace(/,/,',')+'&nbsp;<span style="color:var(--amber)">'+d.getFullYear()+'</span>';
   const present=S.lab.filter(l=>l.present);
   const bw=present.reduce((a,l)=>a+l.wage,0);
-  const ot=present.filter(l=>l.doingOT).reduce((a,l)=>a+Math.round((l.wage/8)*l.ot),0);
+  const ot=present.reduce((a,l)=>a+calcOT(l),0);
   const totalLab=bw+ot;
   const totalGoods=S.sessions.reduce((a,ss)=>a+(ss.teams||[]).reduce((b,t)=>b+t.production.reduce((c,p)=>c+p.value,0),0),0);
   const totalRM=S.rawLog.reduce((a,r)=>a+r.cost,0);const net=totalGoods-totalLab-totalRM;const margin=totalGoods?Math.round(net/totalGoods*100):0;
@@ -2764,8 +2773,8 @@ function renderDay(){
   S.sessions.forEach(ss=>{
     (ss.teams||[]).forEach(t=>{
       const supW=S.lab.find(l=>l.id===ss.supId);
-      const supOT=supW?.doingOT?Math.round((supW.wage/8)*(supW.ot||0)):0;
-      const teamOT=t.team.reduce((a,m)=>a+(m.doingOT?Math.round((m.wage/8)*(m.ot||0)):0),0);
+      const supOT=calcOT(supW);
+      const teamOT=t.team.reduce((a,m)=>a+calcOT(m),0);
       const lc=t.team.reduce((a,m)=>a+m.wage,0)+(t.teamId===1?ss.supWage:0);
       const otc=(t.teamId===1?supOT:0)+teamOT;
       const gv=t.production.reduce((a,p)=>a+p.value,0);
@@ -2786,8 +2795,7 @@ function renderDay(){
 function buildPayload(){
   const present=S.lab.filter(l=>l.present);
   const bw=present.reduce((a,l)=>a+l.wage,0);
-  // Use otHours (new field) not ot (old fixed amount)
-  const ot=present.filter(l=>l.doingOT).reduce((a,l)=>a+Math.round((l.wage/8)*(l.otHours||l.ot||0)),0);
+  const ot=present.reduce((a,l)=>a+calcOT(l),0);
   const totalLab=bw+ot;
   const totalGoods=S.sessions.reduce((a,ss)=>a+(ss.teams||[]).reduce((b,t)=>b+t.production.reduce((c,p)=>c+p.value,0),0),0);
   // Only count actual RM issues — exclude Unit2 transfers
@@ -2797,10 +2805,10 @@ function buildPayload(){
   S.rawLog.filter(r=>r.stage!=='Unit2-Transfer').forEach(r=>stageRM[r.stage]=(stageRM[r.stage]||0)+r.cost);
   S.sessions.forEach(ss=>{
     const sup=S.lab.find(l=>l.id===ss.supId);
-    const supOT=sup?.doingOT?Math.round((sup.wage/8)*(sup.otHours||sup.ot||0)):0;
+    const supOT=calcOT(sup);
     (ss.teams||[]).forEach(t=>{
       const teamLab=t.team.reduce((a,m)=>a+m.wage,0);
-      const teamOT=t.team.reduce((a,m)=>a+(m.doingOT?Math.round((m.wage/8)*(m.otHours||m.ot||0)):0),0);
+      const teamOT=t.team.reduce((a,m)=>a+calcOT(m),0);
       stageLab[t.stage]=(stageLab[t.stage]||0)+teamLab+(t.teamId===1?ss.supWage:0);
       stageOT[t.stage]=(stageOT[t.stage]||0)+teamOT+(t.teamId===1?supOT:0);
     });
@@ -4156,12 +4164,10 @@ function renderInventory(){
   document.getElementById('inv-alerts').innerHTML=alerts.join('');
 }
 
-function calcOT(worker){
-  // OT = (Daily Wage / 8) * OT Hours
-  if(!worker.doingOT || !worker.ot) return 0;
-  return Math.round((worker.wage / 8) * worker.ot);
-}
-
+// NOTE: a second calcOT() used to live here. It read the legacy `worker.ot`
+// field and, being the later declaration, silently overrode the real one —
+// so every OT figure resolved to 0. The single implementation now lives with
+// the other money helpers near uid(). Do not redeclare it here.
 function otAmt(worker){
   return calcOT(worker);
 }
@@ -4547,14 +4553,14 @@ function exportAttendance(){
   const rows=[['Date','Worker','Role','Daily Wage','OT Hours','OT Amount','Status','Wage Earned']];
   if(inRange(S.workDate||todayStr(),from,to)){
     S.lab.forEach(l=>{
-      const otHrs=l.doingOT?(l.otHours||l.ot||0):0;
-      const otAmt=Math.round((l.wage/8)*otHrs);
+      const otHrs=l.doingOT?(parseFloat(l.otHours)||0):0;
+      const otAmt=calcOT(l);
       rows.push([S.workDate,l.name,l.role,l.wage,otHrs,otAmt,l.present?'Present':'Absent',l.present?l.wage:0]);
     });
   }
   S.ledger.filter(e=>inRange(e.date,from,to)).forEach(day=>(day.attendance||[]).forEach(a=>{
     const l=S.lab.find(x=>x.id===a.id);if(!l)return;
-    const otHrs=a.doingOT?(a.otHours||a.ot||0):0;
+    const otHrs=a.doingOT?(parseFloat(a.otHours)||0):0;
     const otAmt=Math.round((l.wage/8)*otHrs);
     rows.push([day.date,l.name,l.role,l.wage,otHrs,otAmt,a.present?'Present':'Absent',a.present?l.wage:0]);
   }));
