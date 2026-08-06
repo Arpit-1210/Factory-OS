@@ -1994,8 +1994,12 @@ function switchAttTab(tab){
 
 function renderAtt(){
   const d=document.getElementById('work-date');
-  d.value=todayStr();
-  S.workDate=todayStr();
+  // DISPLAY the working date — do not overwrite it. This used to assign
+  // todayStr() on every render, which silently undid Save Day: saveDay()
+  // advances workDate to the next day and then navigates here, and this
+  // line reset it to the calendar date. Overnight rollover is handled by
+  // checkDayRollover(), which correctly leaves unsaved days alone.
+  d.value=S.workDate||todayStr();
   if(!S.lab.length){
     document.getElementById('att-grid').innerHTML='<div style="color:var(--text4)">No workers. Add in Setup.</div>';
     updAttMet();return;
@@ -4738,7 +4742,10 @@ let activeFGStage = 'all';
 try{
   S.sheetsUrl=SHEETS_URL;
   const today = todayStr();
-  S.workDate = today;
+  // Respect the date loadState() decided on — it already handles the
+  // date-changed and day-was-saved cases. Assigning unconditionally here
+  // discarded that decision.
+  if(!S.workDate) S.workDate = today;
   persist();
   if(!S.stock||!S.stock.length){S.stock=S.rm.map(r=>({id:r.id,name:r.name,unit:r.unit,opening:0,reorder:100,openingDate:todayStr()}));}
   if(!S.orders) S.orders=[];
