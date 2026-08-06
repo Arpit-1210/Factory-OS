@@ -56,23 +56,13 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
           <div style="font-size:10px;color:var(--text4);font-family:var(--mono)">Set a past date to add missed production/attendance data</div>
         </div>
 
-        <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text4);text-align:center;margin-bottom:8px">OR USE MASTER PASSWORD</div>
-          <div class="role-grid">
-            <div class="role-card" id="rc-owner" onclick="selectRole('owner')">
-              <div class="ri">👨‍💼</div><div class="rn">Owner</div>
-            </div>
-            <div class="role-card" id="rc-supervisor" onclick="selectRole('supervisor')">
-              <div class="ri">👷</div><div class="rn">Supervisor</div>
-            </div>
-            <div class="role-card" id="rc-rm" onclick="selectRole('rm')">
-              <div class="ri">🧪</div><div class="rn">RM Super</div>
-            </div>
-          </div>
-        </div>
+        <!-- The master-password role cards that were here have been removed.
+             They authenticated against empty strings, so clicking a role and
+             submitting a blank password granted full access. Sign-in is now
+             email + password with the role held server-side. -->
 
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);text-align:center">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text4)">Factory OS v2.0 · Built for Propskart</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text4)">Factory OS v3.0 · Built for Propskart</div>
         </div>
       </div>
     </div>
@@ -1100,7 +1090,10 @@ const MNAMES=['January','February','March','April','May','June','July','August',
 const LS_KEY='frp_factory_v5';
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwsVDnWwv1lH5EqwYLLPyu7GXLobPAAjfa7vL1Oc6t8Cezd9GiMNbhINwr4iFx5FhG4/exec" || '';
 
-const PASSWORDS={owner:""||'',supervisor:""||'',rm:""||''};
+// NOTE: the master-password map that used to live here has been removed.
+// Every value was an empty string, so `pwd === PASSWORDS[role]` was true
+// for a blank password — anyone could sign in as owner. Auth is now
+// Supabase email/password with roles enforced by RLS.
 const ROLE_ACCESS={
   owner:['dashboard','setup','sheets','att','sup','raw','day','month','orders','payments','dispatch','transfers','salary','inventory','stock','rmpurchase','fgstock','docs','bom','export'],
   supervisor:['dashboard','att','sup','raw','day'],
@@ -1152,99 +1145,70 @@ function defaultState(){
 
 // ════ LOGIN ════
 let currentRole = null;
-let selectedRole = null;
 
-function selectRole(r){
-  selectedRole=r;
-  ['owner','supervisor','rm'].forEach(x=>{
-    const el=document.getElementById('rc-'+x);
-    if(el){el.style.borderColor=x===r?'var(--amber)':'rgba(255,255,255,0.1)';el.style.background=x===r?'rgba(245,158,11,0.12)':'transparent';}
-  });
-  document.getElementById('login-pwd').focus();
-}
 function togglePwd(){
   const i = document.getElementById('login-pwd');
   i.type = i.type==='password' ? 'text' : 'password';
 }
-// ── USER ACCOUNTS (Firebase Auth) ──
-// Role mapped by email domain/prefix
-const USER_ROLES = {
-  'owner@propskart.com': 'owner',
-  'arpit@propskart.com': 'owner',
-  'rm@propskart.com': 'rm',
-  'shankar@propskart.com': 'supervisor',
-  'deepak.mahto@propskart.com': 'supervisor',
-  'deepak.saw@propskart.com': 'supervisor',
-  'krishna@propskart.com': 'supervisor',
-  'mahesh@propskart.com': 'supervisor',
-  'pankaj@propskart.com': 'supervisor',
-  'piyush@propskart.com': 'supervisor',
-  'ravi@propskart.com': 'supervisor',
-  'robin@propskart.com': 'supervisor',
-  'sandeep@propskart.com': 'supervisor',
-  'subodh@propskart.com': 'supervisor',
-};
-// Any other email = supervisor by default
+// NOTE: the email-to-role map that was here is gone. It defaulted unknown
+// addresses to 'supervisor' on the client, which meant the role was decided
+// in the browser. Roles now live in app_users and are enforced by RLS.
 
-function doLogin(){
-  const email = (document.getElementById('login-email')||{}).value?.trim();
-  const pwd = document.getElementById('login-pwd').value;
+// ── LOGIN ──
+// Email + password only. The old role-card "master password" path is GONE:
+// the passwords were empty strings (the .env values never substituted
+// because there is no build step), so selecting a role and submitting a
+// blank password granted full access to anyone with the URL.
+//
+// Role is now read from app_users and enforced by Postgres RLS. Editing
+// `currentRole` in DevTools no longer grants anything.
+async function doLogin(){
+  const email = ((document.getElementById('login-email')||{}).value||'').trim();
+  const pwd   = document.getElementById('login-pwd').value;
   const errEl = document.getElementById('login-error');
+  const btn   = document.querySelector('.login-btn');
   errEl.style.display='none';
 
-  // If email provided — try Firebase Auth
-  if(email && email.includes('@') && fbEnabled && firebase.auth){
-    const btn = document.querySelector('.login-btn');
-    if(btn) btn.textContent='Signing in...';
-    firebase.auth().signInWithEmailAndPassword(email, pwd)
-      .then(async cred=>{
-        const user = cred.user;
-        if(btn) btn.innerHTML='<span>Sign In</span><span style="margin-left:6px">→</span>';
-        // Fetch role from Firestore
-        let role = null;
-        try {
-          if(db){
-            const userDoc = await db.doc('users/'+user.uid).get();
-            if(userDoc.exists && userDoc.data().role) role = userDoc.data().role;
-          }
-        } catch(e){ console.warn('Role fetch:', e); }
-        if(!role) role = USER_ROLES[email.toLowerCase()] || 'supervisor';
-        currentRole = role;
-        window.currentRole = role;
-        window.db = db;
-        onLoginSuccess(user.displayName||email.split('@')[0]);
-      })
-      .catch(err=>{
-        if(btn) btn.innerHTML='<span>Sign In</span><span style="margin-left:6px">→</span>';
-        // Fallback to master password if Firebase auth fails
-        if(selectedRole && pwd===PASSWORDS[selectedRole]){
-          currentRole=selectedRole;
-          errEl.style.display='none';
-          onLoginSuccess();
-        } else {
-          errEl.textContent='❌ '+( err.code==='auth/user-not-found'?'No account with this email.':
-            err.code==='auth/wrong-password'?'Wrong password.':
-            err.code==='auth/invalid-email'?'Invalid email.':
-            'Login failed. Try master password below.');
-          errEl.style.display='block';
-        }
-      });
+  if(!email || !email.includes('@')){
+    errEl.textContent='❌ Enter your email address.';
+    errEl.style.display='block';
+    return;
+  }
+  if(!pwd){
+    errEl.textContent='❌ Enter your password.';
+    errEl.style.display='block';
     return;
   }
 
-  // Master password login (role cards)
-  if(!selectedRole){errEl.textContent='❌ Select a role or enter your email above.';errEl.style.display='block';return;}
-  if(pwd===PASSWORDS[selectedRole]){
-    currentRole=selectedRole;
-    errEl.style.display='none';
-    document.getElementById('login-pwd').value='';
-    onLoginSuccess();
-  } else {
-    errEl.textContent='❌ Wrong password. Try again.';
+  if(!fbEnabled){
+    const ok = await initFirebase();
+    if(!ok){
+      errEl.textContent='❌ Cannot reach the server. Check your internet connection.';
+      errEl.style.display='block';
+      return;
+    }
+  }
+
+  const restore = btn ? btn.innerHTML : '';
+  if(btn){ btn.textContent='Signing in...'; btn.disabled=true; }
+
+  const res = await FactoryDB.signIn(email, pwd);
+
+  if(btn){ btn.innerHTML=restore; btn.disabled=false; }
+
+  if(!res.ok){
+    errEl.textContent='❌ '+(/invalid login/i.test(res.message||'')
+      ? 'Wrong email or password.'
+      : (res.message||'Login failed.'));
     errEl.style.display='block';
     document.getElementById('login-pwd').value='';
-    document.getElementById('login-pwd').focus();
+    return;
   }
+
+  currentRole = res.role;
+  window.currentRole = res.role;
+  document.getElementById('login-pwd').value='';
+  onLoginSuccess((res.user.user_metadata||{}).name || email.split('@')[0]);
 }
 function onLoginSuccess(displayName){
   // Check if user selected a past date
@@ -1293,8 +1257,10 @@ function onLoginSuccess(displayName){
   renderDashboard();
   go(ROLE_HOME[currentRole]);
 }
-function doLogout(){
-  currentRole=null;selectedRole=null;
+async function doLogout(){
+  if(fbEnabled) await FactoryDB.signOut();
+  currentRole=null;
+  window.currentRole=null;
   document.getElementById('app-shell').style.display='none';
   document.getElementById('login-page').style.display='flex';
   ['owner','supervisor','rm'].forEach(x=>{
@@ -5063,7 +5029,6 @@ try{
 (function(){
   if(typeof spBadge === "function") window.spBadge = spBadge;
   if(typeof defaultState === "function") window.defaultState = defaultState;
-  if(typeof selectRole === "function") window.selectRole = selectRole;
   if(typeof togglePwd === "function") window.togglePwd = togglePwd;
   if(typeof doLogin === "function") window.doLogin = doLogin;
   if(typeof onLoginSuccess === "function") window.onLoginSuccess = onLoginSuccess;
