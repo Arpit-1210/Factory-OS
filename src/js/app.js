@@ -4177,12 +4177,12 @@ let docCounter = { quotation:1, invoice:1, challan:1 };
 let salActiveLab = null;
 let salActiveMonth = null;
 
-function renderSalary(){
-  const monthEl = document.getElementById('sal-month');
-  if(!monthEl) return;
-  const month = monthEl.value || todayStr().slice(0,7);
-  salActiveMonth = month;
-  const [yr, mo] = month.split('-').map(Number);
+// ── MONTHLY SALARY — single source of truth ──
+// Both the Salary screen and the Excel/Sheets export read from here, so
+// the two can never disagree again. They previously used different OT
+// formulas and produced different payroll figures for the same month.
+function computeSalaryMonth(month){
+  const monthLedger = (S.ledger||[]).filter(e=>(e.date||'').slice(0,7)===month);
 
   // Build per-worker attendance count from ledger
   const presenceDays = {};
@@ -4197,21 +4197,24 @@ function renderSalary(){
       }
       if(a.doingOT){
         otDays[a.id]=(otDays[a.id]||0)+1;
-        otHoursTotal[a.id]=(otHoursTotal[a.id]||0)+(a.otHours||a.ot||0);
+        otHoursTotal[a.id]=(otHoursTotal[a.id]||0)+(parseFloat(a.otHours)||0);
       }
     });
   });
 
-  // Also count today if same month and attendance is marked
-  const today2 = new Date();
-  if(today2.getFullYear()===yr && today2.getMonth()+1===mo){
+  // Also count the open working day — but only if it is in the selected
+  // month AND has not already been written to the ledger, otherwise a
+  // saved day would be counted twice. Uses workDate, not the calendar
+  // date, so past-date entry sessions land in the correct month.
+  const wd = S.workDate||todayStr();
+  if(wd.slice(0,7)===month && !monthLedger.some(e=>e.date===wd)){
     S.lab.forEach(l=>{
       if(l.present){
         presenceDays[l.id]=(presenceDays[l.id]||0)+1;
       }
       if(l.doingOT){
         otDays[l.id]=(otDays[l.id]||0)+1;
-        otHoursTotal[l.id]=(otHoursTotal[l.id]||0)+(l.otHours||l.ot||0);
+        otHoursTotal[l.id]=(otHoursTotal[l.id]||0)+(parseFloat(l.otHours)||0);
       }
     });
   }
@@ -4219,19 +4222,35 @@ function renderSalary(){
   if(!S.salaryAdj) S.salaryAdj={};
   const adj = S.salaryAdj[month]||{};
 
-  let totalGross=0, totalAdv=0, totalDed=0, totalNet=0;
+  const totals = {gross:0, adv:0, ded:0, net:0};
 
   const rows = S.lab.map((l,i)=>{
-    const days = presenceDays[l.id]||0;
+    const days  = presenceDays[l.id]||0;
+    const otDay = otDays[l.id]||0;
     const otHrs = otHoursTotal[l.id]||0;
+    // Same rate as calcOT(): daily wage / 8 per hour.
     const otAmt = Math.round((l.wage/8)*otHrs);
     const gross = l.wage*days + otAmt;
-    const adv = (adj[l.id]?.advance)||0;
-    const ded = (adj[l.id]?.deduction)||0;
-    const net = gross - adv - ded;
-    totalGross+=gross; totalAdv+=adv; totalDed+=ded; totalNet+=net;
-    return{l,days,otHrs,otAmt,gross,adv,ded,net,i};
+    const adv   = (adj[l.id]?.advance)||0;
+    const ded   = (adj[l.id]?.deduction)||0;
+    const net   = gross - adv - ded;
+    const note  = adj[l.id]?.note||'';
+    totals.gross+=gross; totals.adv+=adv; totals.ded+=ded; totals.net+=net;
+    return{l,days,otDay,otHrs,otAmt,gross,adv,ded,net,note,i};
   });
+
+  return {rows, totals};
+}
+
+function renderSalary(){
+  const monthEl = document.getElementById('sal-month');
+  if(!monthEl) return;
+  const month = monthEl.value || todayStr().slice(0,7);
+  salActiveMonth = month;
+
+  const {rows, totals} = computeSalaryMonth(month);
+  const totalGross=totals.gross, totalAdv=totals.adv,
+        totalDed=totals.ded,     totalNet=totals.net;
 
   document.getElementById('sal-metrics').innerHTML=`
     <div class="met m-blue"><div class="ml">Total Workers</div><div class="mv w">${S.lab.length}</div></div>
@@ -4295,45 +4314,27 @@ function saveSalAdj(){
 }
 
 function exportSalaryExcel(){
+  if(!checkXLSX()) return;
   const month = (document.getElementById('sal-month')||document.getElementById('export-sal-month'))?.value||todayStr().slice(0,7);
-  const [yr,mo] = month.split('-').map(Number);
-  const monthLedger = S.ledger.filter(e=>{
-    const d=new Date(e.date+'T00:00:00');
-    return d.getFullYear()===yr&&d.getMonth()+1===mo;
-  });
-  const presenceDays={}, otDays={};
-  S.lab.forEach(l=>{presenceDays[l.id]=0;otDays[l.id]=0;});
-  monthLedger.forEach(day=>(day.attendance||[]).forEach(a=>{
-    if(a.present) presenceDays[a.id]=(presenceDays[a.id]||0)+1;
-    if(a.doingOT) otDays[a.id]=(otDays[a.id]||0)+1;
-  }));
-  const adj=S.salaryAdj?.[month]||{};
-  const rows=[['#','Worker','Role','Daily Wage','Days Present','OT Days','OT Amount','Gross Pay','Advance','Deduction','Net Pay','Note']];
-  S.lab.forEach((l,i)=>{
-    const days=presenceDays[l.id]||0;
-    const otD=otDays[l.id]||0;
-    const otAmt=Math.round((l.wage/26)*otD*(l.ot||0));
-    const gross=l.wage*days+otAmt;
-    const adv=(adj[l.id]?.advance)||0;
-    const ded=(adj[l.id]?.deduction)||0;
-    const net=gross-adv-ded;
-    rows.push([i+1,l.name,l.role,l.wage,days,otD,otAmt,gross,adv,ded,net,adj[l.id]?.note||'']);
-  });
-  const ws=XLSX.utils.aoa_to_sheet(rows);
+  // Same computation the Salary screen uses — the two cannot diverge.
+  const {rows} = computeSalaryMonth(month);
+
+  const aoa=[['#','Worker','Role','Daily Wage','Days Present','OT Days','OT Hours','OT Amount','Gross Pay','Advance','Deduction','Net Pay','Note']];
+  rows.forEach(r=>aoa.push([
+    r.i+1, r.l.name, r.l.role, r.l.wage, r.days, r.otDay, r.otHrs,
+    r.otAmt, r.gross, r.adv, r.ded, r.net, r.note
+  ]));
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Salary '+month);
-  XLSX.writeFile(wb,'Salary_'+month+'.xlsx');
+  downloadXLSX(wb,'Salary_'+month+'.xlsx');
+
   // Also sync to Google Sheets Monthly Salary tab
   if(S.sheetsUrl){
-    const workers=S.lab.map(l=>{
-      const days=presenceDays[l.id]||0;
-      const otD=otDays[l.id]||0;
-      const otAmt=Math.round((l.wage/26)*otD*(l.ot||0));
-      const gross=l.wage*days+otAmt;
-      const adv=(adj[l.id]?.advance)||0;
-      const ded=(adj[l.id]?.deduction)||0;
-      return{name:l.name,role:l.role,days,otDays:otD,wage:l.wage,gross,advance:adv,deduction:ded,net:gross-adv-ded};
-    });
+    const workers=rows.map(r=>({
+      name:r.l.name, role:r.l.role, days:r.days, otDays:r.otDay,
+      wage:r.l.wage, gross:r.gross, advance:r.adv, deduction:r.ded, net:r.net
+    }));
     const payload={action:'monthlySalary',month,workers};
     sendGet(S.sheetsUrl,'action=monthlySalary&payload='+encodeURIComponent(JSON.stringify(payload)));
     alert('✓ Salary exported to Excel and synced to Google Sheets → Monthly Salary tab');
