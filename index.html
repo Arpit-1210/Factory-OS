@@ -11,9 +11,12 @@
   <title>Factory OS — Propskart</title>
   <link rel="stylesheet" href="/src/css/style.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX failed')"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" onerror="console.error('Supabase SDK failed to load')"></script>
 </head>
 <body>
   <div id="app-root"></div>
+  <!-- Data layer must load before app.js: app.js calls FactoryDB at boot. -->
+  <script src="/src/js/supabase-db.js"></script>
   <script src="/src/js/app.js"></script>
 </body>
 </html>

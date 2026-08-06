@@ -56,23 +56,13 @@ document.getElementById('app-root').innerHTML = `<!-- ── LOGIN ── -->
           <div style="font-size:10px;color:var(--text4);font-family:var(--mono)">Set a past date to add missed production/attendance data</div>
         </div>
 
-        <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text4);text-align:center;margin-bottom:8px">OR USE MASTER PASSWORD</div>
-          <div class="role-grid">
-            <div class="role-card" id="rc-owner" onclick="selectRole('owner')">
-              <div class="ri">👨‍💼</div><div class="rn">Owner</div>
-            </div>
-            <div class="role-card" id="rc-supervisor" onclick="selectRole('supervisor')">
-              <div class="ri">👷</div><div class="rn">Supervisor</div>
-            </div>
-            <div class="role-card" id="rc-rm" onclick="selectRole('rm')">
-              <div class="ri">🧪</div><div class="rn">RM Super</div>
-            </div>
-          </div>
-        </div>
+        <!-- The master-password role cards that were here have been removed.
+             They authenticated against empty strings, so clicking a role and
+             submitting a blank password granted full access. Sign-in is now
+             email + password with the role held server-side. -->
 
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);text-align:center">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text4)">Factory OS v2.0 · Built for Propskart</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text4)">Factory OS v3.0 · Built for Propskart</div>
         </div>
       </div>
     </div>
@@ -1100,7 +1090,10 @@ const MNAMES=['January','February','March','April','May','June','July','August',
 const LS_KEY='frp_factory_v5';
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwsVDnWwv1lH5EqwYLLPyu7GXLobPAAjfa7vL1Oc6t8Cezd9GiMNbhINwr4iFx5FhG4/exec" || '';
 
-const PASSWORDS={owner:""||'',supervisor:""||'',rm:""||''};
+// NOTE: the master-password map that used to live here has been removed.
+// Every value was an empty string, so `pwd === PASSWORDS[role]` was true
+// for a blank password — anyone could sign in as owner. Auth is now
+// Supabase email/password with roles enforced by RLS.
 const ROLE_ACCESS={
   owner:['dashboard','setup','sheets','att','sup','raw','day','month','orders','payments','dispatch','transfers','salary','inventory','stock','rmpurchase','fgstock','docs','bom','export'],
   supervisor:['dashboard','att','sup','raw','day'],
@@ -1152,99 +1145,70 @@ function defaultState(){
 
 // ════ LOGIN ════
 let currentRole = null;
-let selectedRole = null;
 
-function selectRole(r){
-  selectedRole=r;
-  ['owner','supervisor','rm'].forEach(x=>{
-    const el=document.getElementById('rc-'+x);
-    if(el){el.style.borderColor=x===r?'var(--amber)':'rgba(255,255,255,0.1)';el.style.background=x===r?'rgba(245,158,11,0.12)':'transparent';}
-  });
-  document.getElementById('login-pwd').focus();
-}
 function togglePwd(){
   const i = document.getElementById('login-pwd');
   i.type = i.type==='password' ? 'text' : 'password';
 }
-// ── USER ACCOUNTS (Firebase Auth) ──
-// Role mapped by email domain/prefix
-const USER_ROLES = {
-  'owner@propskart.com': 'owner',
-  'arpit@propskart.com': 'owner',
-  'rm@propskart.com': 'rm',
-  'shankar@propskart.com': 'supervisor',
-  'deepak.mahto@propskart.com': 'supervisor',
-  'deepak.saw@propskart.com': 'supervisor',
-  'krishna@propskart.com': 'supervisor',
-  'mahesh@propskart.com': 'supervisor',
-  'pankaj@propskart.com': 'supervisor',
-  'piyush@propskart.com': 'supervisor',
-  'ravi@propskart.com': 'supervisor',
-  'robin@propskart.com': 'supervisor',
-  'sandeep@propskart.com': 'supervisor',
-  'subodh@propskart.com': 'supervisor',
-};
-// Any other email = supervisor by default
+// NOTE: the email-to-role map that was here is gone. It defaulted unknown
+// addresses to 'supervisor' on the client, which meant the role was decided
+// in the browser. Roles now live in app_users and are enforced by RLS.
 
-function doLogin(){
-  const email = (document.getElementById('login-email')||{}).value?.trim();
-  const pwd = document.getElementById('login-pwd').value;
+// ── LOGIN ──
+// Email + password only. The old role-card "master password" path is GONE:
+// the passwords were empty strings (the .env values never substituted
+// because there is no build step), so selecting a role and submitting a
+// blank password granted full access to anyone with the URL.
+//
+// Role is now read from app_users and enforced by Postgres RLS. Editing
+// `currentRole` in DevTools no longer grants anything.
+async function doLogin(){
+  const email = ((document.getElementById('login-email')||{}).value||'').trim();
+  const pwd   = document.getElementById('login-pwd').value;
   const errEl = document.getElementById('login-error');
+  const btn   = document.querySelector('.login-btn');
   errEl.style.display='none';
 
-  // If email provided — try Firebase Auth
-  if(email && email.includes('@') && fbEnabled && firebase.auth){
-    const btn = document.querySelector('.login-btn');
-    if(btn) btn.textContent='Signing in...';
-    firebase.auth().signInWithEmailAndPassword(email, pwd)
-      .then(async cred=>{
-        const user = cred.user;
-        if(btn) btn.innerHTML='<span>Sign In</span><span style="margin-left:6px">→</span>';
-        // Fetch role from Firestore
-        let role = null;
-        try {
-          if(db){
-            const userDoc = await db.doc('users/'+user.uid).get();
-            if(userDoc.exists && userDoc.data().role) role = userDoc.data().role;
-          }
-        } catch(e){ console.warn('Role fetch:', e); }
-        if(!role) role = USER_ROLES[email.toLowerCase()] || 'supervisor';
-        currentRole = role;
-        window.currentRole = role;
-        window.db = db;
-        onLoginSuccess(user.displayName||email.split('@')[0]);
-      })
-      .catch(err=>{
-        if(btn) btn.innerHTML='<span>Sign In</span><span style="margin-left:6px">→</span>';
-        // Fallback to master password if Firebase auth fails
-        if(selectedRole && pwd===PASSWORDS[selectedRole]){
-          currentRole=selectedRole;
-          errEl.style.display='none';
-          onLoginSuccess();
-        } else {
-          errEl.textContent='❌ '+( err.code==='auth/user-not-found'?'No account with this email.':
-            err.code==='auth/wrong-password'?'Wrong password.':
-            err.code==='auth/invalid-email'?'Invalid email.':
-            'Login failed. Try master password below.');
-          errEl.style.display='block';
-        }
-      });
+  if(!email || !email.includes('@')){
+    errEl.textContent='❌ Enter your email address.';
+    errEl.style.display='block';
+    return;
+  }
+  if(!pwd){
+    errEl.textContent='❌ Enter your password.';
+    errEl.style.display='block';
     return;
   }
 
-  // Master password login (role cards)
-  if(!selectedRole){errEl.textContent='❌ Select a role or enter your email above.';errEl.style.display='block';return;}
-  if(pwd===PASSWORDS[selectedRole]){
-    currentRole=selectedRole;
-    errEl.style.display='none';
-    document.getElementById('login-pwd').value='';
-    onLoginSuccess();
-  } else {
-    errEl.textContent='❌ Wrong password. Try again.';
+  if(!fbEnabled){
+    const ok = await initFirebase();
+    if(!ok){
+      errEl.textContent='❌ Cannot reach the server. Check your internet connection.';
+      errEl.style.display='block';
+      return;
+    }
+  }
+
+  const restore = btn ? btn.innerHTML : '';
+  if(btn){ btn.textContent='Signing in...'; btn.disabled=true; }
+
+  const res = await FactoryDB.signIn(email, pwd);
+
+  if(btn){ btn.innerHTML=restore; btn.disabled=false; }
+
+  if(!res.ok){
+    errEl.textContent='❌ '+(/invalid login/i.test(res.message||'')
+      ? 'Wrong email or password.'
+      : (res.message||'Login failed.'));
     errEl.style.display='block';
     document.getElementById('login-pwd').value='';
-    document.getElementById('login-pwd').focus();
+    return;
   }
+
+  currentRole = res.role;
+  window.currentRole = res.role;
+  document.getElementById('login-pwd').value='';
+  onLoginSuccess((res.user.user_metadata||{}).name || email.split('@')[0]);
 }
 function onLoginSuccess(displayName){
   // Check if user selected a past date
@@ -1273,28 +1237,42 @@ function onLoginSuccess(displayName){
 
   document.getElementById('login-page').style.display='none';
   document.getElementById('app-shell').style.display='flex';
-  if(typeof firebase !== 'undefined' && !fbEnabled) initFirebase();
   const tags={owner:'👨‍💼 Owner',supervisor:'👷 Supervisor',rm:'🧪 RM Supervisor'};
   const el=document.getElementById('role-tag');
   el.textContent=(displayName?displayName+' · ':'')+tags[currentRole];
   el.className='role-tag '+currentRole;
   if(!loginDate || loginDate===todayStr()) checkDayRollover();
   updateSidebarForRole();
-  // CRITICAL: attach live listeners NOW that the role is known.
-  // (initFirebase ran before login with currentRole=null, so no listeners were attached.)
-  if(fbEnabled && db){
+  // Attach realtime subscriptions now that the role is known — init runs
+  // before login with currentRole=null, so nothing was subscribed yet.
+  if(fbEnabled){
     pullFromFirebase().then(function(){
+      // Push once immediately after the first pull.
+      //
+      // This is what seeds an empty database: pull() deliberately keeps the
+      // local catalogue when the remote one is empty (see the first-run
+      // guard in supabase-db.js), and without this push those rows would
+      // never reach Postgres — the owner would appear to be working while
+      // nothing was saved.
+      //
+      // Safe to do unconditionally: pull() has just overwritten local state
+      // with whatever the server had, so for an already-populated database
+      // this writes back what it just read.
+      return pushToFirebase();
+    }).then(function(){
       startFirebaseSync();
       try{renderDashboard();}catch(e){}
       var _sid=(document.querySelector('.screen.active')||{}).id;
       if(_sid) try{go(_sid.replace('sc-',''));}catch(e){}
-    });
+    }).catch(function(e){ console.error('initial sync:', e); });
   }
   renderDashboard();
   go(ROLE_HOME[currentRole]);
 }
-function doLogout(){
-  currentRole=null;selectedRole=null;
+async function doLogout(){
+  if(fbEnabled) await FactoryDB.signOut();
+  currentRole=null;
+  window.currentRole=null;
   document.getElementById('app-shell').style.display='none';
   document.getElementById('login-page').style.display='flex';
   ['owner','supervisor','rm'].forEach(x=>{
@@ -1432,7 +1410,7 @@ function renderDashboard(){
   const totalUnits = S.sessions.reduce((a,ss)=>a+(ss.teams||[]).reduce((b,t)=>b+t.production.reduce((c,p)=>c+p.qty,0),0),0);
   const totalRM = S.rawLog.reduce((a,r)=>a+r.cost,0);
   const bw = present.reduce((a,l)=>a+l.wage,0);
-  const ot = present.filter(l=>l.doingOT).reduce((a,l)=>a+Math.round((l.wage/8)*(l.ot||0)),0);
+  const ot = present.reduce((a,l)=>a+calcOT(l),0);
   const totalLab = bw+ot;
   const net = totalGoods-totalLab-totalRM;
   const packingItems = getAllFGProducts ? getAllFGProducts().filter(p=>getFGBalance(p,'Packing')>0).length : 0;
@@ -1712,377 +1690,142 @@ function orderStatusColor(s){return s==='pending'?'#92400E':s==='production'?'#1
 function orderStatusBg(s){return s==='pending'?'var(--amber-l)':s==='production'?'var(--blue-l)':s==='ready'?'var(--jade-l)':'var(--surface2)';}
 
 // ── FIREBASE ──
-const FB_CONFIG = {
-  apiKey: "AIzaSyBoGZtUxjPekDE5_U7yiWSC7C55N-AkNsQ",
-  authDomain: "frp-factory-3e933.firebaseapp.com",
-  projectId: "frp-factory-3e933",
-  storageBucket: "frp-factory-3e933.firebasestorage.app",
-  messagingSenderId: "842971949999",
-  appId: "1:842971949999:web:0263ae517f057288341d5a"
-};
+// ══════════════════════════════════════════════════════════════════
+//  CLOUD SYNC — Supabase   (implementation: src/js/supabase-db.js)
+//
+//  The function NAMES below are unchanged from the old Firebase layer
+//  on purpose: ~40 call sites across app.js keep working untouched.
+//  Only the implementation moved.
+//
+//  Gone, and why:
+//    _lastLocalWrite echo guard  — writes are row-level now, no echo
+//    30s supervisor poll         — Postgres realtime replaces it
+//    de-dup by supId             — sessions are rows, not an array
+//    _currentSupDocId            — identity is the auth user, not a
+//                                  random id in localStorage
+// ══════════════════════════════════════════════════════════════════
 
-let fbApp = null;
-let db = null;
-let fbEnabled = false;
-let fbUnsubscribe = null;
-// factory docs: factory/owner, factory/supervisor, factory/rm, factory/shared
+let fbEnabled = false;   // true once FactoryDB has initialised
+let db = null;           // Supabase client; kept for legacy truthiness checks
 
-// ── HANDLE TAB VISIBILITY ──
-// When tab goes to background, Firebase disconnects — don't show as offline
+// ── TAB VISIBILITY ──
+// Background tabs drop the realtime socket. Don't flash "Offline" at the
+// user for that — only a genuine network loss sets the error state.
 document.addEventListener('visibilitychange', function(){
   if(document.hidden){
-    // Tab hidden — keep showing last known state, not offline
     const dot = document.getElementById('sync-status');
     const txt = document.getElementById('sync-text');
-    if(dot && dot.className.includes('err')){
-      // Was already error — keep showing
-    } else {
-      // Was ok/syncing — show as synced even though tab is hidden
-      if(dot) dot.className = 'sync-dot ok';
+    if(dot && !dot.className.includes('err')){
+      dot.className = 'sync-dot ok';
       if(txt) txt.textContent = 'Synced';
     }
-  } else {
-    // Tab visible again — reconnect
-    if(fbEnabled && db){
-      updateSyncDot('syncing');
-      // Force a quick push to reconnect
-      setTimeout(()=>{ pushToFirebase(); }, 1000);
-    }
+  } else if(fbEnabled){
+    updateSyncDot('syncing');
+    FactoryDB.flushOutbox();
+    setTimeout(function(){ pushToFirebase(); }, 800);
   }
 });
-
-function initFirebase(){
-  try{
-    if(!firebase.apps.length){
-      fbApp = firebase.initializeApp(FB_CONFIG);
-    } else {
-      fbApp = firebase.apps[0];
-    }
-    db = firebase.firestore();
-
-    // ── OFFLINE PERSISTENCE ──
-    try{
-      db.enablePersistence({synchronizeTabs:true})
-        .catch(err=>{
-          if(err.code==='failed-precondition') console.warn('Multiple tabs — persistence limited');
-          else if(err.code==='unimplemented') console.warn('Browser offline persistence not supported');
-        });
-    }catch(e){ console.warn('Persistence setup:', e); }
-
-    fbEnabled = true;
-    console.log('Firebase connected');
-    updateSyncDot('syncing');
-    // Only show offline when device actually has no internet
-    window.addEventListener('online', ()=>{ updateSyncDot('syncing'); setTimeout(pushToFirebase,1000); });
-    window.addEventListener('offline', ()=>{ updateSyncDot('err'); });
-
-    // Pull ALL data from Firebase first, then start listening
-    pullFromFirebase().then(()=>{
-      updateSyncDot('ok');
-      startFirebaseSync();
-      scheduleAutoBackup();
-      // Supervisor/RM pushes their data immediately on connect
-      if(currentRole==='supervisor'||currentRole==='rm'){
-        setTimeout(pushToFirebase, 1500);
-      }
-      try{ renderHome(); renderDashboard(); }catch(e){}
-    });
-
-  } catch(e){
-    console.error('Firebase init error:', e);
-    fbEnabled = false;
-    updateSyncDot('err');
-  }
-}
-
-// ── AUTO DAILY BACKUP ──
-let _backupTimer = null;
-function scheduleAutoBackup(){
-  if(_backupTimer) clearTimeout(_backupTimer);
-  const now = new Date();
-  const midnight = new Date(now);
-  midnight.setHours(24,0,0,0);
-  const msToMidnight = midnight - now;
-  _backupTimer = setTimeout(()=>{
-    runDailyBackup();
-    // Clear supervisor Firebase doc at midnight — new day starts fresh
-    if(fbEnabled&&db&&currentRole==='supervisor'){
-      db.doc(getMyFirebaseDoc()).set({
-        sessions:[],rawLog:[],fgTransfers:[],
-        _updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
-        _updatedBy:'supervisor',
-        _date:todayStr(),
-        _dayCleared:true
-      },{merge:false});
-    }
-    setInterval(runDailyBackup, 24*60*60*1000);
-  }, msToMidnight);
-  console.log('Auto backup scheduled in', Math.round(msToMidnight/60000), 'minutes');
-}
-
-async function runDailyBackup(){
-  if(!fbEnabled||!db) return;
-  try{
-    const today = todayStr();
-    await db.collection('backups').doc(today).set({
-      ...S,
-      _backedUpAt: firebase.firestore.FieldValue.serverTimestamp(),
-      _date: today
-    });
-    console.log('Daily backup saved:', today);
-    // Cleanup backups older than 30 days
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate()-30);
-    const cutoffStr = cutoff.toISOString().slice(0,10);
-    const old = await db.collection('backups').where('_date','<',cutoffStr).get();
-    old.forEach(doc=>doc.ref.delete());
-  }catch(e){ console.error('Backup failed:',e); }
-}
 
 function updateSyncDot(status){
   const dot = document.getElementById('sync-status');
   const txt = document.getElementById('sync-text');
   if(dot) dot.className = 'sync-dot ' + status;
-  if(txt) txt.textContent = status==='ok'?'Firebase synced':status==='syncing'?'Syncing...':'Offline';
+  if(txt){
+    const pending = (typeof FactoryDB!=='undefined') ? FactoryDB.pendingWrites() : 0;
+    txt.textContent = status==='ok'      ? 'Synced'
+                    : status==='syncing' ? 'Syncing...'
+                    : pending            ? pending+' unsynced'
+                                         : 'Offline';
+  }
 }
 
-// Push local state to Firebase
-// ── FIREBASE SYNC — Role-based subcollections ──
-const ROLE_WRITE_KEYS = {
-  owner: ['orders','ledger','dispatches','salaryAdj','bom','unitTransfers','fgAdjustments'],
-  supervisor: ['sessions','fgTransfers'],
-  rm: ['stock','purchases','rawLog','fgStock'],
-};
-
-let _isSyncing = false;
-let _lastLocalWrite = 0;
-let _currentSupDocId = null; // unique doc per supervisor device
-
-function getMyFirebaseDoc(){
-  if(currentRole==='supervisor'){
-    if(!_currentSupDocId){
-      // Create stable ID from browser — persisted in localStorage
-      let devId = localStorage.getItem('_sup_device_id');
-      if(!devId){
-        devId = 'sup_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,6);
-        localStorage.setItem('_sup_device_id', devId);
-      }
-      _currentSupDocId = devId;
-    }
-    return 'supervisors/'+_currentSupDocId;
+async function initFirebase(){
+  if(typeof FactoryDB === 'undefined'){
+    console.error('supabase-db.js not loaded');
+    updateSyncDot('err');
+    return false;
   }
-  if(currentRole==='rm') return 'factory/rm';
-  return 'factory/owner';
+  const ok = await FactoryDB.init();
+  fbEnabled = ok;
+  db = ok ? FactoryDB.client() : null;
+  window.db = db;
+  window.fbEnabled = fbEnabled;
+  if(!ok){ updateSyncDot('err'); return false; }
+
+  console.log('Supabase connected');
+  updateSyncDot('syncing');
+
+  window.addEventListener('online',  function(){ updateSyncDot('syncing'); FactoryDB.flushOutbox(); });
+  window.addEventListener('offline', function(){ updateSyncDot('err'); });
+
+  // Replay anything queued while offline before pulling fresh state,
+  // otherwise a pull would overwrite unsent local work.
+  await FactoryDB.flushOutbox();
+
+  if(currentRole){
+    await pullFromFirebase();
+    startFirebaseSync();
+    try{ renderHome(); renderDashboard(); }catch(e){}
+  }
+  updateSyncDot('ok');
+  return true;
 }
 
 async function pushToFirebase(){
-  if(!fbEnabled||!db||_isSyncing) return;
-  _isSyncing = true;
-  _lastLocalWrite = Date.now();
-  updateSyncDot('syncing');
-  try{
-    const role = currentRole||'owner';
-    const docPath = getMyFirebaseDoc();
-    const payload = {
-      _updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      _updatedBy: role,
-      _date: S.workDate||todayStr()
-    };
-
-    if(role==='supervisor'){
-      // A stale cleared-flag for the CURRENT working day is impossible by definition
-      // (if the day were saved, workDate would have advanced) — remove it, never wipe data
-      if(localStorage.getItem('_day_cleared_'+(S.workDate||''))){
-        localStorage.removeItem('_day_cleared_'+S.workDate);
-      }
-      payload.sessions = S.sessions||[];
-      payload.fgTransfers = S.fgTransfers||[];
-      payload.rawLog = S.rawLog||[];
-    } else if(role==='rm'){
-      payload.stock = S.stock||[];
-      payload.purchases = S.purchases||[];
-      payload.rawLog = S.rawLog||[];
-      payload.fgStock = S.fgStock||{};
-    } else {
-      // Owner
-      const writeKeys = ['orders','ledger','dispatches','salaryAdj','bom','unitTransfers','fgAdjustments'];
-      writeKeys.forEach(k=>{if(S[k]!==undefined)payload[k]=S[k];});
-      // Owner also writes shared catalogue
-      await db.doc('factory/shared').set({
-        fg:S.fg, lab:S.lab, rm:S.rm,
-        fgStock:S.fgStock, fgTransfers:S.fgTransfers,
-        orderReservations:S.orderReservations||[],
-        _updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-      },{merge:true});
-    }
-
-    await db.doc(docPath).set(payload, {merge:true});
-    updateSyncDot('ok');
-    console.log('Pushed to:', docPath, 'sessions:', (payload.sessions||[]).length);
-  }catch(e){
-    console.error('Firebase push:',e);
-    // Only show error dot if actually offline
-    if(!navigator.onLine) updateSyncDot('err');
-    else updateSyncDot('ok'); // push failed but we're online - keep showing ok
-  }
-  finally{_isSyncing=false;}
+  if(!fbEnabled || !currentRole) return;
+  await FactoryDB.push(S, currentRole);
 }
 
 async function pullFromFirebase(){
-  if(!fbEnabled||!db) return;
-  try{
-    // Pull owner + rm + shared data (never pull sessions from any supervisor doc)
-    const paths=['factory/main','factory/owner','factory/rm','factory/shared'];
-    const docs = await Promise.all(paths.map(p=>db.doc(p).get().catch(()=>null)));
-    docs.forEach(snap=>{
-      if(!snap||!snap.exists) return;
-      const data=snap.data();
-      // Never pull sessions or rawLog — these belong to supervisor devices only
-      Object.keys(data).filter(k=>!k.startsWith('_')&&k!=='sessions'&&k!=='rawLog').forEach(k=>{
-        if(data[k]!==undefined) S[k]=data[k];
-      });
-    });
-    // If owner, also pull all supervisor sessions to show on dashboard
-    if(currentRole==='owner'){
-      await pullSupervisorSessions();
-    }
-    localStorage.setItem(LS_KEY, JSON.stringify(S));
-    console.log('Firebase pull OK');
-  }catch(e){console.error('Firebase pull:',e);}
+  if(!fbEnabled) return;
+  await FactoryDB.pull(S);
+  window.S = S;
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
 }
 
-async function pullSupervisorSessions(){
-  try{
-    const today=S.workDate||todayStr();
-    // Never restore if Save Day was clicked today
-    if(localStorage.getItem('_day_cleared_'+today)){
-      S.sessions=[];
-      return;
-    }
-    const supSnaps=await db.collection('supervisors').get();
-    const allSessions=[];
-    supSnaps.forEach(doc=>{
-      const data=doc.data();
-      if(data._date===today&&!data._dayCleared&&data.sessions&&data.sessions.length>0){
-        data.sessions.forEach(ss=>{
-          if(!allSessions.find(x=>x.supId===ss.supId)) allSessions.push(ss);
-        });
-      }
-    });
-    if(allSessions.length>0) S.sessions=allSessions;
-    else S.sessions=[];
-  }catch(e){console.error('pullSupervisorSessions:',e);}
-}
+// The owner's view of supervisor sessions is now just a pull. The manual
+// merge and de-duplication this used to do is gone — sessions are rows,
+// and RLS stops one supervisor from touching another's.
+async function pullSupervisorSessions(){ return pullFromFirebase(); }
+async function pullSupervisorData(){ return pullFromFirebase(); }
 
 function startFirebaseSync(){
-  if(!fbEnabled||!db) return;
-  if(fbUnsubscribe) fbUnsubscribe();
-  const unsubs = [];
-
-  // 1. Owner listens to owner doc + shared + rm
-  if(currentRole==='owner'){
-    ['factory/owner','factory/shared','factory/rm'].forEach(path=>{
-      unsubs.push(db.doc(path).onSnapshot(snap=>{
-        if(!snap.exists||Date.now()-_lastLocalWrite<5000) return;
-        const data=snap.data();if(!data) return;
-        if(path==='factory/shared' && data._workDate && S.workDate && data._workDate>S.workDate){
-          adoptWorkDate(data._workDate, data._savedDate);
-        }
-        Object.keys(data).filter(k=>!k.startsWith('_')&&k!=='sessions'&&k!=='rawLog').forEach(k=>{
-          if(data[k]!==undefined) S[k]=data[k];
-        });
-        localStorage.setItem(LS_KEY,JSON.stringify(S));
-        updateSyncDot('ok');
-        const sid=(document.querySelector('.screen.active')||{}).id?.replace('sc-','');
-        if(['orders','payments','month','salary','dispatch','att','dashboard'].includes(sid)) try{go(sid);}catch(e){}
-      },err=>{if(!navigator.onLine)updateSyncDot('err');}));
-    });
-
-    // Owner listens LIVE to all supervisor docs — production appears instantly
-    unsubs.push(db.collection('supervisors').onSnapshot(snap=>{
-      const today=S.workDate||todayStr();
-      if(isDaySaved(today)) return;
-      const allSessions=[],allRaw=[];
-      snap.forEach(doc=>{
-        const data=doc.data();
-        if(data._date===today&&!data._dayCleared){
-          (data.sessions||[]).forEach(ss=>{if(!allSessions.find(x=>x.supId===ss.supId))allSessions.push(ss);});
-          (data.rawLog||[]).forEach(r=>{if(!allRaw.find(x=>x.id===r.id))allRaw.push(r);});
-        }
-      });
-      let changed=false;
-      if(allSessions.length>0&&JSON.stringify(allSessions)!==JSON.stringify(S.sessions||[])){S.sessions=allSessions;changed=true;}
-      if(allRaw.length>0&&JSON.stringify(allRaw)!==JSON.stringify(S.rawLog||[])){S.rawLog=allRaw;changed=true;}
-      if(changed){
-        localStorage.setItem(LS_KEY,JSON.stringify(S));
-        updateSyncDot('ok');
-        try{renderDashboard();}catch(e){}
-        const sid=(document.querySelector('.screen.active')||{}).id?.replace('sc-','');
-        if(['dashboard','day','raw','month'].includes(sid)) try{go(sid);}catch(e){}
-      }
-    },err=>{if(!navigator.onLine)updateSyncDot('err');}));
-
-    // Backup poll every 30 seconds (kept as safety net)
-    function pollSupervisorSessions(){
-      const today=S.workDate||todayStr();
-      if(localStorage.getItem('_day_cleared_'+today)) return;
-      db.collection('supervisors').get().then(snap=>{
-        const allSessions=[];
-        snap.forEach(doc=>{
-          const data=doc.data();
-          if(data._date===today&&!data._dayCleared&&data.sessions&&data.sessions.length>0){
-            data.sessions.forEach(ss=>{
-              if(!allSessions.find(x=>x.supId===ss.supId)) allSessions.push(ss);
-            });
-          }
-        });
-        if(allSessions.length>0){
-          S.sessions=allSessions;
-          localStorage.setItem(LS_KEY,JSON.stringify(S));
-          try{renderDashboard();}catch(e){}
-        }
-      }).catch(()=>{});
+  if(!fbEnabled || !currentRole) return;
+  FactoryDB.startSync(S, currentRole, function(state){
+    S = state;
+    window.S = S;
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
+    updateSyncDot('ok');
+    try{ renderDashboard(); }catch(e){}
+    // Never re-render the production ('sup') screen from a remote event:
+    // it would reset the selected team and wipe inputs mid-entry.
+    const sid = (document.querySelector('.screen.active')||{}).id;
+    if(sid && sid !== 'sc-sup'){
+      try{ go(sid.replace('sc-','')); }catch(e){}
     }
-    // Poll every 30 seconds
-    pollSupervisorSessions();
-    const pollInterval = setInterval(pollSupervisorSessions, 30000);
-    unsubs.push(()=>clearInterval(pollInterval));
-  }
+  });
+}
 
-  // 2. Supervisor listens ONLY to shared (catalogue updates) — never to other supervisor docs
-  if(currentRole==='supervisor'){
-    unsubs.push(db.doc('factory/shared').onSnapshot(snap=>{
-      if(!snap.exists) return; // no _lastLocalWrite guard: supervisors never write lab/fg/rm, so owner updates must always apply
-      const data=snap.data();if(!data) return;
-      if(data._workDate && S.workDate && data._workDate>S.workDate){
-        adoptWorkDate(data._workDate, data._savedDate);
-      }
-      // Only update catalogue data — never sessions/rawLog
-      ['fg','lab','rm'].forEach(k=>{if(data[k]!==undefined)S[k]=data[k];});
-      localStorage.setItem(LS_KEY,JSON.stringify(S));
-      updateSyncDot('ok');
-      // Refresh ONLY the attendance screen. Never re-render the production ('sup')
-      // screen from here — it would reset the selected team & wipe inputs mid-entry.
-      const _sid=(document.querySelector('.screen.active')||{}).id?.replace('sc-','');
-      if(_sid==='att'){ try{renderAtt();}catch(e){} }
-    },err=>{if(!navigator.onLine)updateSyncDot('err');}));
-  }
+function stopFirebaseSync(){
+  if(fbEnabled) FactoryDB.stopSync();
+}
 
-  // 3. RM supervisor listens to shared only
-  if(currentRole==='rm'){
-    unsubs.push(db.doc('factory/shared').onSnapshot(snap=>{
-      if(!snap.exists||Date.now()-_lastLocalWrite<5000) return;
-      const data=snap.data();if(!data) return;
-      if(data._workDate && S.workDate && data._workDate>S.workDate){
-        adoptWorkDate(data._workDate, data._savedDate);
-      }
-      ['fg','lab','rm','fgStock','fgTransfers'].forEach(k=>{if(data[k]!==undefined)S[k]=data[k];});
-      localStorage.setItem(LS_KEY,JSON.stringify(S));
-      updateSyncDot('ok');
-    },err=>{if(!navigator.onLine)updateSyncDot('err');}));
-  }
+// Daily backups are Postgres point-in-time recovery now. The old version
+// wrote the ENTIRE app state into one document per day, which was on
+// course to breach Firestore's 1 MiB limit as the ledger grew.
+function scheduleAutoBackup(){ /* no-op — Supabase handles backups */ }
 
-  fbUnsubscribe=()=>unsubs.forEach(u=>typeof u==='function'&&u());
+async function runDailyBackup(){
+  if(!fbEnabled) return;
+  await FactoryDB.saveDay(S.workDate||todayStr(), buildPayload());
+  console.log('Day snapshot saved:', S.workDate);
+}
+
+// Attendance changes push immediately rather than waiting for the 2s
+// persist() debounce, so the owner's marks reach supervisors live.
+function pushAttendanceLive(){
+  if(!fbEnabled) return;
+  pushToFirebase();
 }
 
 function persist(){
@@ -2094,6 +1837,15 @@ function persist(){
 }
 
 function uid(){ return Date.now()+Math.floor(Math.random()*99999); }
+
+// ── OVERTIME — single source of truth ──
+// OT is paid per hour at (daily wage / 8). `otHours` is the ONLY field
+// read here. The legacy `ot` field held a flat rupee-per-day amount and
+// is no longer used in any money calculation anywhere in the app.
+function calcOT(w){
+  if(!w || !w.doingOT) return 0;
+  return Math.round(((parseFloat(w.wage)||0)/8) * (parseFloat(w.otHours)||0));
+}
 
 function fmt(n){ return '₹'+Math.round(n).toLocaleString('en-IN'); }
 
@@ -2167,17 +1919,19 @@ function updateSyncStatus(){ S.sheetsUrl?setSyncStatus('ok','Connected'):setSync
 
 function uploadRM(evt){ const f=evt.target.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'binary'});const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1});let n=0;rows.forEach((row,i)=>{if(i===0||!row[0])return;S.rm.push({id:uid(),name:String(row[0]).trim(),unit:String(row[1]||'kg').trim(),price:parseFloat(row[2])||0});n++;});persist();document.getElementById('rm-st').innerHTML=`<div class="gbox">✓ Imported ${n} materials</div>`;renderSetup();}catch(e){document.getElementById('rm-st').innerHTML=`<div class="wbox">Error reading file</div>`;}};r.readAsBinaryString(f);}
 
-function uploadLab(evt){ const f=evt.target.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'binary'});const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1});let n=0;rows.forEach((row,i)=>{if(i===0||!row[0])return;const isSup=String(row[3]||'').toLowerCase().includes('yes');S.lab.push({id:uid(),name:String(row[0]).trim(),role:String(row[1]||'Floor worker').trim(),wage:parseFloat(row[2])||0,ot:parseFloat(row[4])||0,isSup,present:false,doingOT:false});n++;});persist();document.getElementById('lab-st').innerHTML=`<div class="gbox">✓ Imported ${n} workers</div>`;renderSetup();}catch(e){document.getElementById('lab-st').innerHTML=`<div class="wbox">Error reading file</div>`;}};r.readAsBinaryString(f);}
+function uploadLab(evt){ const f=evt.target.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'binary'});const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1});let n=0;rows.forEach((row,i)=>{if(i===0||!row[0])return;const isSup=String(row[3]||'').toLowerCase().includes('yes');S.lab.push({id:uid(),name:String(row[0]).trim(),role:String(row[1]||'Floor worker').trim(),wage:parseFloat(row[2])||0,isSup,present:false,doingOT:false,otHours:0});n++;});persist();document.getElementById('lab-st').innerHTML=`<div class="gbox">✓ Imported ${n} workers</div>`;renderSetup();}catch(e){document.getElementById('lab-st').innerHTML=`<div class="wbox">Error reading file</div>`;}};r.readAsBinaryString(f);}
 
 function dlSampleRM(){const ws=XLSX.utils.aoa_to_sheet([['Material Name','Unit','Price per Unit (Rs)'],['FRP Resin','kg',220],['Hardener','kg',180],['Gelcoat','kg',310]]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sheet1');downloadXLSX(wb,'sample_raw_materials.xlsx');}
 
-function dlSampleLab(){const ws=XLSX.utils.aoa_to_sheet([['Name','Role','Daily Wage (Rs)','Supervisor? (Yes/No)','Overtime Amount Rs/day'],['Ramesh Kumar','Floor worker',600,'No',0],['Karan Patel','Supervisor',900,'Yes',200]]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sheet1');downloadXLSX(wb,'sample_labour.xlsx');}
+// No OT column: overtime is paid per hour at (daily wage / 8) and entered
+// on the Attendance screen each day, not stored per worker.
+function dlSampleLab(){const ws=XLSX.utils.aoa_to_sheet([['Name','Role','Daily Wage (Rs)','Supervisor? (Yes/No)'],['Ramesh Kumar','Floor worker',600,'No'],['Karan Patel','Supervisor',900,'Yes']]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sheet1');downloadXLSX(wb,'sample_labour.xlsx');}
 
 function renderSetup(){
   const q=(document.getElementById('fg-search')?.value||'').toLowerCase();
   document.getElementById('tb-rm').innerHTML=S.rm.map((r,i)=>`<tr><td style="color:var(--fog)">${i+1}</td><td style="font-weight:500;color:#111827">${r.name}</td><td style="color:var(--dust)">${r.unit}</td><td class="num">${fmtN(r.price)}</td><td><button class="btn btn-ember btn-xs" onclick="delRM(${r.id})">✕</button></td></tr>`).join('');
   document.getElementById('tb-fg').innerHTML=S.fg.filter(f=>!q||f.name.toLowerCase().includes(q)).map((f,i)=>`<tr><td style="color:var(--fog)">${i+1}</td><td style="font-weight:500;color:#111827">${f.name}</td><td class="num" style="color:var(--fog)">${f.id}</td><td class="num">${fmtN(f.price)}</td><td><button class="btn btn-ember btn-xs" onclick="delFG(${f.id})">✕</button></td></tr>`).join('');
-  document.getElementById('tb-lab').innerHTML=S.lab.map((l,i)=>`<tr><td style="color:var(--fog)">${i+1}</td><td style="font-weight:500;color:#111827">${l.name}</td><td style="color:var(--dust)">${l.role}</td><td class="num">${fmtN(l.wage)}</td><td class="num">${l.ot?l.ot+'h':'—'}</td><td>${l.isSup?'<span class="badge b-sup">SUP</span>':''}</td><td><button class="btn btn-ember btn-xs" onclick="delLab(${l.id})">✕</button></td></tr>`).join('');
+  document.getElementById('tb-lab').innerHTML=S.lab.map((l,i)=>`<tr><td style="color:var(--fog)">${i+1}</td><td style="font-weight:500;color:#111827">${l.name}</td><td style="color:var(--dust)">${l.role}</td><td class="num">${fmtN(l.wage)}</td><td class="num">${l.otHours?l.otHours+'h':'—'}</td><td>${l.isSup?'<span class="badge b-sup">SUP</span>':''}</td><td><button class="btn btn-ember btn-xs" onclick="delLab(${l.id})">✕</button></td></tr>`).join('');
 }
 
 function addRM(){const n=document.getElementById('rm-n').value.trim();const u=document.getElementById('rm-u').value;const p=parseFloat(document.getElementById('rm-p').value)||0;if(!n||!p){alert('Enter name and price.');return;}S.rm.push({id:uid(),name:n,unit:u,price:p});document.getElementById('rm-n').value='';document.getElementById('rm-p').value='';persist();renderSetup();}
@@ -2188,7 +1942,7 @@ function addFG(){const n=document.getElementById('fg-n').value.trim();const p=pa
 
 function delFG(id){S.fg=S.fg.filter(f=>f.id!==id);persist();renderSetup();}
 
-function addLab(){const n=document.getElementById('lab-n').value.trim();const r=document.getElementById('lab-r').value;const w=parseFloat(document.getElementById('lab-w').value)||0;const ot=parseFloat(document.getElementById('lab-ot').value)||0;const s=document.getElementById('lab-s').value==='1';if(!n||!w){alert('Enter name and wage.');return;}S.lab.push({id:uid(),name:n,role:r,wage:w,ot,isSup:s,present:false,doingOT:false});document.getElementById('lab-n').value='';document.getElementById('lab-w').value='';document.getElementById('lab-ot').value='';persist();renderSetup();}
+function addLab(){const n=document.getElementById('lab-n').value.trim();const r=document.getElementById('lab-r').value;const w=parseFloat(document.getElementById('lab-w').value)||0;const ot=parseFloat(document.getElementById('lab-ot').value)||0;const s=document.getElementById('lab-s').value==='1';if(!n||!w){alert('Enter name and wage.');return;}S.lab.push({id:uid(),name:n,role:r,wage:w,isSup:s,present:false,doingOT:false,otHours:0});document.getElementById('lab-n').value='';document.getElementById('lab-w').value='';document.getElementById('lab-ot').value='';persist();renderSetup();}
 
 function delLab(id){S.lab=S.lab.filter(l=>l.id!==id);persist();renderSetup();}
 
@@ -2240,8 +1994,12 @@ function switchAttTab(tab){
 
 function renderAtt(){
   const d=document.getElementById('work-date');
-  d.value=todayStr();
-  S.workDate=todayStr();
+  // DISPLAY the working date — do not overwrite it. This used to assign
+  // todayStr() on every render, which silently undid Save Day: saveDay()
+  // advances workDate to the next day and then navigates here, and this
+  // line reset it to the calendar date. Overnight rollover is handled by
+  // checkDayRollover(), which correctly leaves unsaved days alone.
+  d.value=S.workDate||todayStr();
   if(!S.lab.length){
     document.getElementById('att-grid').innerHTML='<div style="color:var(--text4)">No workers. Add in Setup.</div>';
     updAttMet();return;
@@ -2267,7 +2025,7 @@ function renderOTTab(){
     return;
   }
   let totalOT = 0;
-  present.forEach(l=>{ totalOT += l.doingOT ? Math.round((l.wage/8)*(l.otHours||0)) : 0; });
+  present.forEach(l=>{ totalOT += calcOT(l); });
   const otDisp = document.getElementById('ot-total-display');
   if(otDisp) otDisp.textContent = 'Total OT: ₹'+totalOT.toLocaleString('en-IN');
 
@@ -2278,7 +2036,7 @@ function renderOTTab(){
     </tr></thead>
     <tbody>${present.map(l=>{
       const hrs = l.otHours||0;
-      const otPay = l.doingOT ? Math.round((l.wage/8)*hrs) : 0;
+      const otPay = calcOT(l);
       return`<tr style="${l.doingOT?'background:var(--amber-l)':''}">
         <td style="font-weight:600">${l.name}${l.isSup?' ⭐':''}</td>
         <td style="color:var(--text3);font-size:11px">${l.role}</td>
@@ -2308,8 +2066,6 @@ function setOTHours(id, val){
   l.otHours = parseFloat(val)||0;
   if(l.otHours > 0) l.doingOT = true;
   else l.doingOT = false;
-  // Also keep legacy ot field in sync for buildPayload
-  l.ot = l.otHours;
   persist();
   renderOTTab();
   updAttMet();
@@ -2322,7 +2078,6 @@ function togOT(id){
   if(!l) return;
   l.doingOT^=1;
   if(!l.doingOT) l.otHours=0;
-  l.ot=l.otHours||0;
   persist();
   renderOTTab();
   updAttMet();
@@ -2333,7 +2088,7 @@ function markAll(v){S.lab.forEach(l=>{l.present=!!v;if(!v){l.doingOT=false;l.otH
 function updAttMet(){
   const p=S.lab.filter(l=>l.present);
   const bw=p.reduce((a,l)=>a+l.wage,0);
-  const ot=p.filter(l=>l.doingOT).reduce((a,l)=>a+Math.round((l.wage/8)*(l.otHours||l.ot||0)),0);
+  const ot=p.reduce((a,l)=>a+calcOT(l),0);
   document.getElementById('a-tot').textContent=S.lab.length;
   document.getElementById('a-pres').textContent=p.length;
   document.getElementById('a-abs').textContent=S.lab.length-p.length;
@@ -2381,7 +2136,7 @@ function enterSup(supId){
   const sup=S.lab.find(l=>l.id===supId);activeSupId=supId;
   let sess=S.sessions.find(ss=>ss.supId===supId);
   if(!sess){
-    sess={supId,supName:sup.name,supWage:sup.wage,supOT:sup.doingOT?sup.ot:0,teams:[]};
+    sess={supId,supName:sup.name,supWage:sup.wage,supOT:calcOT(sup),teams:[]};
     S.sessions.push(sess);
   }
   // Migrate old format sessions
@@ -2392,7 +2147,7 @@ function enterSup(supId){
   document.getElementById('sup-login').style.display='none';
   document.getElementById('sup-work').style.display='block';
   document.getElementById('sw-name').textContent=sup.name;
-  document.getElementById('sw-meta').textContent=sup.role+' · '+fmt(sup.wage)+'/day'+(sup.doingOT?` + ${fmt(sup.ot)} OT`:'');
+  document.getElementById('sw-meta').textContent=sup.role+' · '+fmt(sup.wage)+'/day'+(sup.doingOT?` + ${fmt(calcOT(sup))} OT`:'');
   activeTeamId=null;
   renderSupWork();
 }
@@ -2502,7 +2257,7 @@ function renderSupTeamWork(sess, team){
   }
 
   // Labour cost
-  const lc=team.team.reduce((a,m)=>a+m.wage,0)+(team.team.reduce((a,m)=>a+(m.doingOT?m.ot:0),0));
+  const lc=team.team.reduce((a,m)=>a+m.wage,0)+(team.team.reduce((a,m)=>a+calcOT(m),0));
   document.getElementById('sw-lab-cost').textContent=team.team.length?`Team ${team.teamId} Labour: ${fmt(lc)}/day`:'';
 
   // Back button in team section
@@ -2562,7 +2317,7 @@ function renderSupTeamWork(sess, team){
   const pt=document.getElementById('sw-prod-tbl');
   if(!team.production.length){pt.innerHTML='';return;}
   const tv=team.production.reduce((a,p)=>a+p.value,0);
-  const lc2=team.team.reduce((a,m)=>a+m.wage,0)+team.team.reduce((a,m)=>a+(m.doingOT?m.ot:0),0);
+  const lc2=team.team.reduce((a,m)=>a+m.wage,0)+team.team.reduce((a,m)=>a+calcOT(m),0);
   pt.innerHTML=`<table class="tbl"><thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Wt/pc</th><th class="num">Total Wt</th><th class="num">₹/kg</th><th class="num">₹/unit</th><th class="num">Total</th><th></th></tr></thead>
   <tbody>${team.production.map((p,i)=>{const wt=p.weightPerPc||0;const tw=p.totalWeight||0;const rpkg=wt>0?Math.round(p.unitVal/wt):0;
     return`<tr><td style="font-weight:500;color:#111827">${p.name}</td><td class="num">${p.qty}</td><td class="num">${wt||'—'}</td><td class="num">${tw?fmtN(tw)+' kg':'—'}</td><td class="num" style="color:#B45309">${rpkg?fmt(rpkg):'—'}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(p.value)}</td><td><button class="btn btn-ember btn-xs" onclick="delProd(${i})">✕</button></td></tr>`;}).join('')}
@@ -2743,7 +2498,7 @@ function renderDay(){
   document.getElementById('day-title').innerHTML=d.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}).replace(/,/,',')+'&nbsp;<span style="color:var(--amber)">'+d.getFullYear()+'</span>';
   const present=S.lab.filter(l=>l.present);
   const bw=present.reduce((a,l)=>a+l.wage,0);
-  const ot=present.filter(l=>l.doingOT).reduce((a,l)=>a+Math.round((l.wage/8)*l.ot),0);
+  const ot=present.reduce((a,l)=>a+calcOT(l),0);
   const totalLab=bw+ot;
   const totalGoods=S.sessions.reduce((a,ss)=>a+(ss.teams||[]).reduce((b,t)=>b+t.production.reduce((c,p)=>c+p.value,0),0),0);
   const totalRM=S.rawLog.reduce((a,r)=>a+r.cost,0);const net=totalGoods-totalLab-totalRM;const margin=totalGoods?Math.round(net/totalGoods*100):0;
@@ -2764,8 +2519,8 @@ function renderDay(){
   S.sessions.forEach(ss=>{
     (ss.teams||[]).forEach(t=>{
       const supW=S.lab.find(l=>l.id===ss.supId);
-      const supOT=supW?.doingOT?Math.round((supW.wage/8)*(supW.ot||0)):0;
-      const teamOT=t.team.reduce((a,m)=>a+(m.doingOT?Math.round((m.wage/8)*(m.ot||0)):0),0);
+      const supOT=calcOT(supW);
+      const teamOT=t.team.reduce((a,m)=>a+calcOT(m),0);
       const lc=t.team.reduce((a,m)=>a+m.wage,0)+(t.teamId===1?ss.supWage:0);
       const otc=(t.teamId===1?supOT:0)+teamOT;
       const gv=t.production.reduce((a,p)=>a+p.value,0);
@@ -2786,8 +2541,7 @@ function renderDay(){
 function buildPayload(){
   const present=S.lab.filter(l=>l.present);
   const bw=present.reduce((a,l)=>a+l.wage,0);
-  // Use otHours (new field) not ot (old fixed amount)
-  const ot=present.filter(l=>l.doingOT).reduce((a,l)=>a+Math.round((l.wage/8)*(l.otHours||l.ot||0)),0);
+  const ot=present.reduce((a,l)=>a+calcOT(l),0);
   const totalLab=bw+ot;
   const totalGoods=S.sessions.reduce((a,ss)=>a+(ss.teams||[]).reduce((b,t)=>b+t.production.reduce((c,p)=>c+p.value,0),0),0);
   // Only count actual RM issues — exclude Unit2 transfers
@@ -2797,10 +2551,10 @@ function buildPayload(){
   S.rawLog.filter(r=>r.stage!=='Unit2-Transfer').forEach(r=>stageRM[r.stage]=(stageRM[r.stage]||0)+r.cost);
   S.sessions.forEach(ss=>{
     const sup=S.lab.find(l=>l.id===ss.supId);
-    const supOT=sup?.doingOT?Math.round((sup.wage/8)*(sup.otHours||sup.ot||0)):0;
+    const supOT=calcOT(sup);
     (ss.teams||[]).forEach(t=>{
       const teamLab=t.team.reduce((a,m)=>a+m.wage,0);
-      const teamOT=t.team.reduce((a,m)=>a+(m.doingOT?Math.round((m.wage/8)*(m.otHours||m.ot||0)):0),0);
+      const teamOT=t.team.reduce((a,m)=>a+calcOT(m),0);
       stageLab[t.stage]=(stageLab[t.stage]||0)+teamLab+(t.teamId===1?ss.supWage:0);
       stageOT[t.stage]=(stageOT[t.stage]||0)+teamOT+(t.teamId===1?supOT:0);
     });
@@ -2866,32 +2620,17 @@ function saveDay(){
   if(wdEl) wdEl.value = nextStr;
   persist();
 
-  // Clear Firebase supervisor doc
-  if(fbEnabled && db && currentRole==='supervisor'){
-    db.doc(getMyFirebaseDoc()).set({
-      sessions:[], rawLog:[], fgTransfers:[],
-      _updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      _updatedBy: 'supervisor',
-      _date: nextStr,
-      _dayCleared: true,
-      _savedDate: savedDate
-    }, {merge:false});
-  }
-
-  // Owner saves day → broadcast rollover to ALL devices via shared doc
-  if(fbEnabled && db && currentRole==='owner'){
-    db.doc('factory/shared').set({
-      _workDate: nextStr,
-      _savedDate: savedDate,
-      lab: S.lab, // attendance reset for new day
-      _updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    },{merge:true}).catch(function(e){console.warn('rollover broadcast:',e);});
-    // Also clear all supervisor session docs for the new day
-    db.collection('supervisors').get().then(function(snap){
-      snap.forEach(function(doc){
-        doc.ref.set({sessions:[],rawLog:[],_date:nextStr,_dayCleared:false,_savedDate:savedDate},{merge:true});
-      });
-    }).catch(function(){});
+  // Persist the closed day as one row in `day_ledger`.
+  //
+  // Nothing needs "clearing" any more. Every operational table is keyed
+  // by work_date, so the next day simply has no rows yet — which is what
+  // made the old _dayCleared flags, the supervisor doc wipes, and the
+  // rollover broadcast unnecessary. Those three mechanisms are the source
+  // of most of the day-rollover bugs in the git history.
+  if(fbEnabled){
+    FactoryDB.saveDay(savedDate, payload)
+      .then(function(){ return pushToFirebase(); })
+      .catch(function(e){ console.warn('saveDay:', e); });
   }
 
   setTimeout(()=>{
@@ -4156,12 +3895,10 @@ function renderInventory(){
   document.getElementById('inv-alerts').innerHTML=alerts.join('');
 }
 
-function calcOT(worker){
-  // OT = (Daily Wage / 8) * OT Hours
-  if(!worker.doingOT || !worker.ot) return 0;
-  return Math.round((worker.wage / 8) * worker.ot);
-}
-
+// NOTE: a second calcOT() used to live here. It read the legacy `worker.ot`
+// field and, being the later declaration, silently overrode the real one —
+// so every OT figure resolved to 0. The single implementation now lives with
+// the other money helpers near uid(). Do not redeclare it here.
 function otAmt(worker){
   return calcOT(worker);
 }
@@ -4177,12 +3914,12 @@ let docCounter = { quotation:1, invoice:1, challan:1 };
 let salActiveLab = null;
 let salActiveMonth = null;
 
-function renderSalary(){
-  const monthEl = document.getElementById('sal-month');
-  if(!monthEl) return;
-  const month = monthEl.value || todayStr().slice(0,7);
-  salActiveMonth = month;
-  const [yr, mo] = month.split('-').map(Number);
+// ── MONTHLY SALARY — single source of truth ──
+// Both the Salary screen and the Excel/Sheets export read from here, so
+// the two can never disagree again. They previously used different OT
+// formulas and produced different payroll figures for the same month.
+function computeSalaryMonth(month){
+  const monthLedger = (S.ledger||[]).filter(e=>(e.date||'').slice(0,7)===month);
 
   // Build per-worker attendance count from ledger
   const presenceDays = {};
@@ -4197,21 +3934,24 @@ function renderSalary(){
       }
       if(a.doingOT){
         otDays[a.id]=(otDays[a.id]||0)+1;
-        otHoursTotal[a.id]=(otHoursTotal[a.id]||0)+(a.otHours||a.ot||0);
+        otHoursTotal[a.id]=(otHoursTotal[a.id]||0)+(parseFloat(a.otHours)||0);
       }
     });
   });
 
-  // Also count today if same month and attendance is marked
-  const today2 = new Date();
-  if(today2.getFullYear()===yr && today2.getMonth()+1===mo){
+  // Also count the open working day — but only if it is in the selected
+  // month AND has not already been written to the ledger, otherwise a
+  // saved day would be counted twice. Uses workDate, not the calendar
+  // date, so past-date entry sessions land in the correct month.
+  const wd = S.workDate||todayStr();
+  if(wd.slice(0,7)===month && !monthLedger.some(e=>e.date===wd)){
     S.lab.forEach(l=>{
       if(l.present){
         presenceDays[l.id]=(presenceDays[l.id]||0)+1;
       }
       if(l.doingOT){
         otDays[l.id]=(otDays[l.id]||0)+1;
-        otHoursTotal[l.id]=(otHoursTotal[l.id]||0)+(l.otHours||l.ot||0);
+        otHoursTotal[l.id]=(otHoursTotal[l.id]||0)+(parseFloat(l.otHours)||0);
       }
     });
   }
@@ -4219,19 +3959,35 @@ function renderSalary(){
   if(!S.salaryAdj) S.salaryAdj={};
   const adj = S.salaryAdj[month]||{};
 
-  let totalGross=0, totalAdv=0, totalDed=0, totalNet=0;
+  const totals = {gross:0, adv:0, ded:0, net:0};
 
   const rows = S.lab.map((l,i)=>{
-    const days = presenceDays[l.id]||0;
+    const days  = presenceDays[l.id]||0;
+    const otDay = otDays[l.id]||0;
     const otHrs = otHoursTotal[l.id]||0;
+    // Same rate as calcOT(): daily wage / 8 per hour.
     const otAmt = Math.round((l.wage/8)*otHrs);
     const gross = l.wage*days + otAmt;
-    const adv = (adj[l.id]?.advance)||0;
-    const ded = (adj[l.id]?.deduction)||0;
-    const net = gross - adv - ded;
-    totalGross+=gross; totalAdv+=adv; totalDed+=ded; totalNet+=net;
-    return{l,days,otHrs,otAmt,gross,adv,ded,net,i};
+    const adv   = (adj[l.id]?.advance)||0;
+    const ded   = (adj[l.id]?.deduction)||0;
+    const net   = gross - adv - ded;
+    const note  = adj[l.id]?.note||'';
+    totals.gross+=gross; totals.adv+=adv; totals.ded+=ded; totals.net+=net;
+    return{l,days,otDay,otHrs,otAmt,gross,adv,ded,net,note,i};
   });
+
+  return {rows, totals};
+}
+
+function renderSalary(){
+  const monthEl = document.getElementById('sal-month');
+  if(!monthEl) return;
+  const month = monthEl.value || todayStr().slice(0,7);
+  salActiveMonth = month;
+
+  const {rows, totals} = computeSalaryMonth(month);
+  const totalGross=totals.gross, totalAdv=totals.adv,
+        totalDed=totals.ded,     totalNet=totals.net;
 
   document.getElementById('sal-metrics').innerHTML=`
     <div class="met m-blue"><div class="ml">Total Workers</div><div class="mv w">${S.lab.length}</div></div>
@@ -4295,45 +4051,27 @@ function saveSalAdj(){
 }
 
 function exportSalaryExcel(){
+  if(!checkXLSX()) return;
   const month = (document.getElementById('sal-month')||document.getElementById('export-sal-month'))?.value||todayStr().slice(0,7);
-  const [yr,mo] = month.split('-').map(Number);
-  const monthLedger = S.ledger.filter(e=>{
-    const d=new Date(e.date+'T00:00:00');
-    return d.getFullYear()===yr&&d.getMonth()+1===mo;
-  });
-  const presenceDays={}, otDays={};
-  S.lab.forEach(l=>{presenceDays[l.id]=0;otDays[l.id]=0;});
-  monthLedger.forEach(day=>(day.attendance||[]).forEach(a=>{
-    if(a.present) presenceDays[a.id]=(presenceDays[a.id]||0)+1;
-    if(a.doingOT) otDays[a.id]=(otDays[a.id]||0)+1;
-  }));
-  const adj=S.salaryAdj?.[month]||{};
-  const rows=[['#','Worker','Role','Daily Wage','Days Present','OT Days','OT Amount','Gross Pay','Advance','Deduction','Net Pay','Note']];
-  S.lab.forEach((l,i)=>{
-    const days=presenceDays[l.id]||0;
-    const otD=otDays[l.id]||0;
-    const otAmt=Math.round((l.wage/26)*otD*(l.ot||0));
-    const gross=l.wage*days+otAmt;
-    const adv=(adj[l.id]?.advance)||0;
-    const ded=(adj[l.id]?.deduction)||0;
-    const net=gross-adv-ded;
-    rows.push([i+1,l.name,l.role,l.wage,days,otD,otAmt,gross,adv,ded,net,adj[l.id]?.note||'']);
-  });
-  const ws=XLSX.utils.aoa_to_sheet(rows);
+  // Same computation the Salary screen uses — the two cannot diverge.
+  const {rows} = computeSalaryMonth(month);
+
+  const aoa=[['#','Worker','Role','Daily Wage','Days Present','OT Days','OT Hours','OT Amount','Gross Pay','Advance','Deduction','Net Pay','Note']];
+  rows.forEach(r=>aoa.push([
+    r.i+1, r.l.name, r.l.role, r.l.wage, r.days, r.otDay, r.otHrs,
+    r.otAmt, r.gross, r.adv, r.ded, r.net, r.note
+  ]));
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Salary '+month);
-  XLSX.writeFile(wb,'Salary_'+month+'.xlsx');
+  downloadXLSX(wb,'Salary_'+month+'.xlsx');
+
   // Also sync to Google Sheets Monthly Salary tab
   if(S.sheetsUrl){
-    const workers=S.lab.map(l=>{
-      const days=presenceDays[l.id]||0;
-      const otD=otDays[l.id]||0;
-      const otAmt=Math.round((l.wage/26)*otD*(l.ot||0));
-      const gross=l.wage*days+otAmt;
-      const adv=(adj[l.id]?.advance)||0;
-      const ded=(adj[l.id]?.deduction)||0;
-      return{name:l.name,role:l.role,days,otDays:otD,wage:l.wage,gross,advance:adv,deduction:ded,net:gross-adv-ded};
-    });
+    const workers=rows.map(r=>({
+      name:r.l.name, role:r.l.role, days:r.days, otDays:r.otDay,
+      wage:r.l.wage, gross:r.gross, advance:r.adv, deduction:r.ded, net:r.net
+    }));
     const payload={action:'monthlySalary',month,workers};
     sendGet(S.sheetsUrl,'action=monthlySalary&payload='+encodeURIComponent(JSON.stringify(payload)));
     alert('✓ Salary exported to Excel and synced to Google Sheets → Monthly Salary tab');
@@ -4546,14 +4284,14 @@ function exportAttendance(){
   const rows=[['Date','Worker','Role','Daily Wage','OT Hours','OT Amount','Status','Wage Earned']];
   if(inRange(S.workDate||todayStr(),from,to)){
     S.lab.forEach(l=>{
-      const otHrs=l.doingOT?(l.otHours||l.ot||0):0;
-      const otAmt=Math.round((l.wage/8)*otHrs);
+      const otHrs=l.doingOT?(parseFloat(l.otHours)||0):0;
+      const otAmt=calcOT(l);
       rows.push([S.workDate,l.name,l.role,l.wage,otHrs,otAmt,l.present?'Present':'Absent',l.present?l.wage:0]);
     });
   }
   S.ledger.filter(e=>inRange(e.date,from,to)).forEach(day=>(day.attendance||[]).forEach(a=>{
     const l=S.lab.find(x=>x.id===a.id);if(!l)return;
-    const otHrs=a.doingOT?(a.otHours||a.ot||0):0;
+    const otHrs=a.doingOT?(parseFloat(a.otHours)||0):0;
     const otAmt=Math.round((l.wage/8)*otHrs);
     rows.push([day.date,l.name,l.role,l.wage,otHrs,otAmt,a.present?'Present':'Absent',a.present?l.wage:0]);
   }));
@@ -4978,6 +4716,16 @@ function loadState(){
         merged.workDate = today;
       }
 
+      // ── ONE-TIME MIGRATION: legacy OT field ──
+      // `ot` used to hold a flat rupee-per-day amount. OT is now paid per
+      // hour at (wage / 8) and read exclusively from `otHours`. Any stale
+      // rupee value left in `ot` would render as bogus "hours" in the
+      // worker table, so drop it. Nothing reads `ot` for money any more.
+      if(merged.lab) merged.lab.forEach(l=>{
+        if(l.ot !== undefined) delete l.ot;
+        if(typeof l.otHours !== 'number') l.otHours = 0;
+      });
+
       return merged;
     }
   }catch(e){}
@@ -4994,7 +4742,10 @@ let activeFGStage = 'all';
 try{
   S.sheetsUrl=SHEETS_URL;
   const today = todayStr();
-  S.workDate = today;
+  // Respect the date loadState() decided on — it already handles the
+  // date-changed and day-was-saved cases. Assigning unconditionally here
+  // discarded that decision.
+  if(!S.workDate) S.workDate = today;
   persist();
   if(!S.stock||!S.stock.length){S.stock=S.rm.map(r=>({id:r.id,name:r.name,unit:r.unit,opening:0,reorder:100,openingDate:todayStr()}));}
   if(!S.orders) S.orders=[];
@@ -5047,7 +4798,6 @@ try{
 (function(){
   if(typeof spBadge === "function") window.spBadge = spBadge;
   if(typeof defaultState === "function") window.defaultState = defaultState;
-  if(typeof selectRole === "function") window.selectRole = selectRole;
   if(typeof togglePwd === "function") window.togglePwd = togglePwd;
   if(typeof doLogin === "function") window.doLogin = doLogin;
   if(typeof onLoginSuccess === "function") window.onLoginSuccess = onLoginSuccess;
@@ -5067,7 +4817,6 @@ try{
   if(typeof initFirebase === "function") window.initFirebase = initFirebase;
   if(typeof scheduleAutoBackup === "function") window.scheduleAutoBackup = scheduleAutoBackup;
   if(typeof updateSyncDot === "function") window.updateSyncDot = updateSyncDot;
-  if(typeof getMyFirebaseDoc === "function") window.getMyFirebaseDoc = getMyFirebaseDoc;
   if(typeof startFirebaseSync === "function") window.startFirebaseSync = startFirebaseSync;
   if(typeof persist === "function") window.persist = persist;
   if(typeof uid === "function") window.uid = uid;
@@ -5220,106 +4969,20 @@ try{
   console.log('Factory OS ready');
 });
 
-// ── LOAD FIREBASE ──
-loadScript('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js', function(){
-  loadScript('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js', function(){
-    loadScript('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js', function(){
-      console.log('Firebase SDK loaded');
-      if(typeof firebase !== 'undefined' && typeof initFirebase === 'function' && !fbEnabled){
-        initFirebase();
-      } else if(typeof firebase === 'undefined'){
-        console.error('Firebase SDK failed to load — check network/CDN');
-        updateSyncDot('err');
-      }
-    });
-  });
-});
+// ── BOOT CLOUD SYNC ──
+// supabase-js and supabase-db.js are loaded by index.html before this
+// file, so the SDK is already present. No runtime CDN fetch needed.
+initFirebase();
 
 
 // ══════════════════════════════════════════════
 // ── FACTORY OS FIXES & ENHANCEMENTS ──
 // ══════════════════════════════════════════════
 
-// ── FIX: Push attendance live when supervisor marks it ──
-function pushAttendanceLive(){
-  if(!fbEnabled||!db) return;
-  // Owner marks attendance → push lab (with present flags) to shared doc immediately
-  if(currentRole==='owner'){
-    db.doc('factory/shared').set({
-      lab: S.lab,
-      _updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    },{merge:true}).catch(function(e){ console.warn('Owner att push:', e); });
-    return;
-  }
-  var devId = localStorage.getItem('_sup_device_id');
-  if(!devId) return;
-  var attData = S.lab.map(function(l){
-    return {id:l.id,name:l.name,wage:l.wage||0,present:!!l.present,doingOT:!!l.doingOT,otHours:l.otHours||0};
-  });
-  // Merge attendance into supervisor doc
-  db.doc('supervisors/'+devId).get().then(function(snap){
-    var existing = snap.exists ? snap.data() : {};
-    existing.attendance = attData;
-    existing.workersPresent = attData.filter(function(a){return a.present;}).length;
-    existing._date = (typeof S!=='undefined'&&S.workDate)||todayStr();
-    existing._updatedAt = firebase.firestore.FieldValue.serverTimestamp();
-    db.doc('supervisors/'+devId).set(existing, {merge:true}).catch(function(e){
-      console.warn('Att push:', e);
-    });
-  });
-}
-window.pushAttendanceLive = pushAttendanceLive;
-
-// ── FIX: Pull all supervisor data for owner ──
-function pullSupervisorData(){
-  if(currentRole!=='owner'||!fbEnabled||!db) return;
-  var today = S.workDate||todayStr(); // compare against the WORKING day, not calendar day
-  if(isDaySaved(today)) return;
-  db.collection('supervisors').get().then(function(snap){
-    var sessions=[],rawLog=[],attMap={};
-    snap.forEach(function(doc){
-      var d=doc.data();
-      if(d._date!==today||d._dayCleared) return;
-      (d.sessions||[]).forEach(function(ss){
-        if(!sessions.find(function(x){return x.supId===ss.supId;})) sessions.push(ss);
-      });
-      (d.rawLog||[]).forEach(function(r){
-        if(!rawLog.find(function(x){return x.id===r.id;})) rawLog.push(r);
-      });
-      (d.attendance||[]).forEach(function(a){
-        if(!attMap[a.id]||a.present) attMap[a.id]=a;
-      });
-      // Also mark team members as present from sessions
-      (d.sessions||[]).forEach(function(ss){
-        (ss.teams||[]).forEach(function(t){
-          (t.team||[]).forEach(function(m){
-            if(!attMap[m.id]) attMap[m.id]={id:m.id,name:m.name,present:true,doingOT:false,otHours:0};
-            else attMap[m.id].present=true;
-          });
-        });
-      });
-    });
-    var changed=false;
-    if(sessions.length>0 && JSON.stringify(sessions)!==JSON.stringify(S.sessions||[])){S.sessions=sessions;changed=true;}
-    if(rawLog.length>0 && JSON.stringify(rawLog)!==JSON.stringify(S.rawLog||[])){S.rawLog=rawLog;changed=true;}
-    // NOTE: owner is the source of truth for attendance — do NOT apply
-    // supervisor attendance back onto owner's lab (it would overwrite owner marks)
-    if(changed){
-      window.S=S;
-      try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
-      updateSyncDot('ok');
-      try{renderDashboard();}catch(e){}
-      var sid=(document.querySelector('.screen.active')||{}).id;
-      if(sid) try{go(sid.replace('sc-',''));}catch(e){}
-    }
-  }).catch(function(e){console.warn('pullSupervisorData:',e);});
-}
-window.pullSupervisorData = pullSupervisorData;
-
-// ── Auto-pull every 10 seconds for owner ──
-setInterval(function(){
-  if(window.currentRole==='owner') pullSupervisorData();
-}, 10000);
+// NOTE: pushAttendanceLive() and pullSupervisorData() now live in the
+// cloud-sync section above. The versions that were here merged and
+// de-duplicated supervisor documents by hand and polled every 10s.
+// Postgres realtime replaces all of it.
 
 // ── Session backup every 5 min ──
 setInterval(function(){
