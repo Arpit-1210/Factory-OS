@@ -1247,6 +1247,19 @@ function onLoginSuccess(displayName){
   // before login with currentRole=null, so nothing was subscribed yet.
   if(fbEnabled){
     pullFromFirebase().then(function(){
+      // Push once immediately after the first pull.
+      //
+      // This is what seeds an empty database: pull() deliberately keeps the
+      // local catalogue when the remote one is empty (see the first-run
+      // guard in supabase-db.js), and without this push those rows would
+      // never reach Postgres — the owner would appear to be working while
+      // nothing was saved.
+      //
+      // Safe to do unconditionally: pull() has just overwritten local state
+      // with whatever the server had, so for an already-populated database
+      // this writes back what it just read.
+      return pushToFirebase();
+    }).then(function(){
       startFirebaseSync();
       try{renderDashboard();}catch(e){}
       var _sid=(document.querySelector('.screen.active')||{}).id;
