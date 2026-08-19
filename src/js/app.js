@@ -1836,7 +1836,41 @@ function persist(){
   }
 }
 
-function uid(){ return Date.now()+Math.floor(Math.random()*99999); }
+// ── ID GENERATION ──
+// These ids are bigint PRIMARY KEYs in Postgres and the `onConflict` target
+// for raw_log and fg_transfers, so a duplicate silently OVERWRITES another
+// row instead of inserting.
+//
+// The old formula ADDED the random part to the clock
+// (`Date.now() + random*99999`), which collapsed the whole id space into a
+// ~100s band: an id minted now was indistinguishable from one minted up to
+// 99,998 ms earlier with a different draw. A tight loop of 2,000 ids produced
+// ~22 collisions.
+//
+// Shifting instead of adding gives the timestamp its own range, so ids from
+// different milliseconds can never collide. 2048 stays inside
+// Number.MAX_SAFE_INTEGER until the year 2109 (2^53 / 2048 ms since epoch);
+// the multiplier cannot be raised much further without losing integer
+// precision. Legacy ids (~1.7e12) sit far below the new range, so old and new
+// ids cannot collide either.
+//
+// 11 bits of pure randomness would still collide inside a single millisecond
+// (a bulk Excel import mints hundreds per ms), so the low bits are a counter,
+// not a fresh draw:
+//   · a new millisecond seeds the counter randomly in the lower half, so two
+//     devices logging in the same millisecond start from different offsets;
+//   · repeat calls within that millisecond increment, which is collision-free
+//     on this device by construction;
+//   · overflowing the 2048 slots borrows from the next millisecond rather
+//     than wrapping onto an id already issued.
+// Ids are therefore strictly increasing per device and never repeat.
+var _uidMs = 0, _uidSeq = 0;
+function uid(){
+  var t = Date.now();
+  if(t > _uidMs){ _uidMs = t; _uidSeq = Math.floor(Math.random()*1024); }
+  else if(++_uidSeq >= 2048){ _uidMs++; _uidSeq = Math.floor(Math.random()*1024); }
+  return _uidMs*2048 + _uidSeq;
+}
 
 // ── OVERTIME — single source of truth ──
 // OT is paid per hour at (daily wage / 8). `otHours` is the ONLY field
