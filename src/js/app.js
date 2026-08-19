@@ -5067,13 +5067,19 @@ function isDaySaved(d){
 }
 function adoptWorkDate(newDate, savedDate){
   if(savedDate) localStorage.setItem('_day_cleared_'+savedDate,'1');
+  // Move to the new date BEFORE filtering. isDaySaved() treats S.workDate as
+  // "the open day, never saved" and clears its _day_cleared_ flag as a side
+  // effect — so filtering first made every row still carrying the OLD date
+  // look unsaved, erased the flag marking that day closed, and carried
+  // already-saved production forward into the new day, where getFGBalance()
+  // counted it a second time on top of the ledger.
+  S.workDate=newDate;
   // Drop only sessions from days already saved; carry unsaved in-progress work to the new date
   S.sessions=(S.sessions||[]).filter(function(s){return !isDaySaved(s.date);});
   S.sessions.forEach(function(s){s.date=newDate;});
   S.rawLog=(S.rawLog||[]).filter(function(r){return !isDaySaved(r.date);});
   S.rawLog.forEach(function(r){r.date=newDate;});
   (S.lab||[]).forEach(function(l){l.present=false;l.doingOT=false;l.otHours=0;});
-  S.workDate=newDate;
   var wd=document.getElementById('work-date'); if(wd) wd.value=newDate;
   try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
   try{renderDashboard();}catch(e){}
