@@ -163,21 +163,28 @@
   // ── SHAPE HELPERS ───────────────────────────────────────────────
   // Postgres rows <-> the shapes app.js already expects, so no screen
   // or report needs to change.
+  // app.js keys opening stock as S.fgStock[STAGE][PRODUCT] everywhere — see
+  // getFGBalance() (app.js:3544) and the dashboard packing tile (app.js:1633).
+  // These two mappers used to read it the other way round, so fg_stock.product
+  // held "Packing" and fg_stock.stage held "Chair A". The app never noticed
+  // because both mappers inverted identically and the round trip cancelled
+  // out, but the rows in Postgres were wrong for anything reading that table
+  // in SQL. Migration 0003 swaps the rows written before this fix.
   function rowsToFgStock(rows) {
     var out = {};
     (rows || []).forEach(function (r) {
-      if (!out[r.product]) out[r.product] = {};
-      out[r.product][r.stage] = Number(r.qty) || 0;
+      if (!out[r.stage]) out[r.stage] = {};
+      out[r.stage][r.product] = Number(r.qty) || 0;
     });
     return out;
   }
 
   function fgStockToRows(obj) {
     var rows = [];
-    Object.keys(obj || {}).forEach(function (product) {
-      var stages = obj[product] || {};
-      Object.keys(stages).forEach(function (stage) {
-        rows.push({ product: product, stage: stage, qty: Number(stages[stage]) || 0 });
+    Object.keys(obj || {}).forEach(function (stage) {
+      var products = obj[stage] || {};
+      Object.keys(products).forEach(function (product) {
+        rows.push({ product: product, stage: stage, qty: Number(products[product]) || 0 });
       });
     });
     return rows;
