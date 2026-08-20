@@ -21,7 +21,11 @@ const read = (p) => {
 };
 
 // Shared-logic modules, in the order main.js imports them.
-const CORE_MODULES = ['src/js/core/config.js', 'src/js/core/format.js'];
+const CORE_MODULES = [
+  'src/js/core/config.js',
+  'src/js/core/format.js',
+  'src/js/core/state.js',
+];
 
 // Bundling is memoised: 150+ tests each call boot(), and re-bundling per call
 // would dominate the run time.
