@@ -2206,6 +2206,29 @@ function updAttMet(){
   document.getElementById('a-total-lab').textContent=fmt(bw+ot);
 }
 
+// ── SESSION SHAPE — read every session through these ──
+// Sessions have carried teams[] since the multi-team rework. enterSup()
+// migrates a legacy single-team session when it is OPENED, but screens also
+// render sessions nobody has opened — one logged on another device, most
+// importantly. Reading ss.team / ss.production directly therefore throws on
+// every current-shape session. That killed the active-session list on the
+// Production screen and the whole Raw Material screen, both of which looked
+// like "the sync is broken" rather than a render crash.
+function sessionTeams(ss){
+  if(!ss) return [];
+  if(ss.teams) return ss.teams;
+  if(ss.team || ss.production){
+    return [{teamId:1, stage:ss.stage, team:ss.team||[], production:ss.production||[]}];
+  }
+  return [];
+}
+function sessionProduction(ss){
+  return sessionTeams(ss).reduce(function(a,t){ return a.concat(t.production||[]); },[]);
+}
+function sessionMembers(ss){
+  return sessionTeams(ss).reduce(function(a,t){ return a.concat(t.team||[]); },[]);
+}
+
 function renderSupLogin(){
   // Show pending/in-production orders as task list for supervisors
   const ob = document.getElementById('sup-orders-banner');
@@ -2232,7 +2255,14 @@ function renderSupLogin(){
   g.innerHTML=sups.map(s=>{const h=!!S.sessions.find(ss=>ss.supId===s.id);return`<div class="sc ${h?'has-s':''}" onclick="enterSup(${s.id})"><div class="sc-ic">👷</div><div class="sc-nm">${s.name}</div><div class="sc-rl">${s.role} · ${fmt(s.wage)}/day</div><div class="sc-st" style="color:${h?'var(--jade)':'var(--fog)'}">${h?'✓ Session active':'Tap to start'}</div></div>`;}).join('');
   const sl=document.getElementById('sup-sess-list');
   if(!S.sessions.length){sl.innerHTML='<div style="color:#6B7280;font-size:12px">No active sessions yet.</div>';return;}
-  sl.innerHTML=S.sessions.map(ss=>{const lc=ss.team.reduce((a,m)=>a+m.wage,0)+ss.supWage;const gv=ss.production.reduce((a,p)=>a+p.value,0);return`<div class="tp"><div class="tph"><div><span class="tpn">${ss.supName}</span>&nbsp;${`<span class=\"sp sp${STAGES.indexOf(ss.stage)}\">" + ss.stage + "</span>`}</div><div style="display:flex;gap:6px;align-items:center"><span style="font-family:var(--mono);font-size:10px;color:var(--dust)">${ss.team.length} workers · ${fmt(lc)}/day</span><button class="btn btn-ember btn-xs" onclick="delSess(${ss.supId})">✕</button></div></div><div style="font-size:11px;color:var(--dust)">Team: ${ss.team.map(m=>m.name).join(', ')||'—'}</div>${ss.production.length?`<div style="font-size:11px;color:var(--jade);margin-top:4px;font-family:var(--mono)">Produced: ${ss.production.map(p=>`${p.qty}× ${p.name}`).join(' | ')} = ${fmt(gv)}</div>`:'<div style="font-size:11px;color:var(--fog);margin-top:4px">No production logged yet</div>'}</div>`;}).join('');
+  sl.innerHTML=S.sessions.map(ss=>{
+    const teams   = sessionTeams(ss);
+    const members = sessionMembers(ss);
+    const prod    = sessionProduction(ss);
+    const lc      = members.reduce((a,m)=>a+(m.wage||0),0)+(ss.supWage||0);
+    const gv      = prod.reduce((a,p)=>a+(p.value||0),0);
+    const stages  = [...new Set(teams.map(t=>t.stage).filter(Boolean))];
+    return`<div class="tp"><div class="tph"><div><span class="tpn">${ss.supName}</span>&nbsp;${stages.map(spBadge).join(' ')}</div><div style="display:flex;gap:6px;align-items:center"><span style="font-family:var(--mono);font-size:10px;color:var(--dust)">${members.length} workers · ${fmt(lc)}/day</span><button class="btn btn-ember btn-xs" onclick="delSess(${ss.supId})">✕</button></div></div><div style="font-size:11px;color:var(--dust)">Team: ${members.map(m=>m.name).join(', ')||'—'}</div>${prod.length?`<div style="font-size:11px;color:var(--jade);margin-top:4px;font-family:var(--mono)">Produced: ${prod.map(p=>`${p.qty}× ${p.name}`).join(' | ')} = ${fmt(gv)}</div>`:'<div style="font-size:11px;color:var(--fog);margin-top:4px">No production logged yet</div>'}</div>`;}).join('');
 }
 
 function delSess(id){
@@ -2598,9 +2628,9 @@ function issueRaw(){const stg=document.getElementById('raw-stg').value;const ms=
 
 function delRaw(id){S.rawLog=S.rawLog.filter(r=>r.id!==id);persist();renderRawLog();renderRawPnL();}
 
-function renderRawLog(){const el=document.getElementById('raw-log');if(!S.rawLog.length){el.innerHTML='<div style="color:#6B7280;font-size:12px">Nothing issued yet.</div>';return;}el.innerHTML=`<table class="tbl"><thead><tr><th>Stage</th><th>Material</th><th class="num">Qty</th><th class="num">₹/unit</th><th class="num">Total</th><th></th></tr></thead><tbody>${S.rawLog.map(r=>`<tr><td>${`<span class=\"sp sp${STAGES.indexOf(r.stage)}\">" + r.stage + "</span>`}</td><td style="font-weight:500;color:#111827">${r.name}</td><td class="num">${r.qty} ${r.unit}</td><td class="num">${fmtN(r.unitPrice)}</td><td class="num">${fmtN(r.cost)}</td><td><button class="btn btn-ember btn-xs" onclick="delRaw(${r.id})">✕</button></td></tr>`).join('')}</tbody></table>`;}
+function renderRawLog(){const el=document.getElementById('raw-log');if(!S.rawLog.length){el.innerHTML='<div style="color:#6B7280;font-size:12px">Nothing issued yet.</div>';return;}el.innerHTML=`<table class="tbl"><thead><tr><th>Stage</th><th>Material</th><th class="num">Qty</th><th class="num">₹/unit</th><th class="num">Total</th><th></th></tr></thead><tbody>${S.rawLog.map(r=>`<tr><td>${spBadge(r.stage)}</td><td style="font-weight:500;color:#111827">${r.name}</td><td class="num">${r.qty} ${r.unit}</td><td class="num">${fmtN(r.unitPrice)}</td><td class="num">${fmtN(r.cost)}</td><td><button class="btn btn-ember btn-xs" onclick="delRaw(${r.id})">✕</button></td></tr>`).join('')}</tbody></table>`;}
 
-function renderRawPnL(){const t=S.rawLog.reduce((a,r)=>a+r.cost,0);const g=S.sessions.reduce((a,ss)=>a+ss.production.reduce((b,p)=>b+p.value,0),0);const profit=g-t;document.getElementById('raw-pnl').innerHTML=`<div class="mrow"><div class="met m-blue"><div class="ml">All Goods</div><div class="mv w">${fmt(g)}</div></div><div class="met m-red"><div class="ml">RM Cost</div><div class="mv r">${fmt(t)}</div></div><div class="met ${profit>=0?'m-green':'m-red'}"><div class="ml">RM Supervisor Net</div><div class="mv ${profit>=0?'g':'r'}">${fmt(profit)}</div></div></div>`;}
+function renderRawPnL(){const t=S.rawLog.reduce((a,r)=>a+r.cost,0);const g=S.sessions.reduce((a,ss)=>a+sessionProduction(ss).reduce((b,p)=>b+(p.value||0),0),0);const profit=g-t;document.getElementById('raw-pnl').innerHTML=`<div class="mrow"><div class="met m-blue"><div class="ml">All Goods</div><div class="mv w">${fmt(g)}</div></div><div class="met m-red"><div class="ml">RM Cost</div><div class="mv r">${fmt(t)}</div></div><div class="met ${profit>=0?'m-green':'m-red'}"><div class="ml">RM Supervisor Net</div><div class="mv ${profit>=0?'g':'r'}">${fmt(profit)}</div></div></div>`;}
 
 function renderDay(){
   const d=new Date(S.workDate+'T00:00:00');
