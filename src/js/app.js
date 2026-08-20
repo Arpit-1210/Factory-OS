@@ -5013,6 +5013,21 @@ try{
   if(typeof scheduleAutoBackup === "function") window.scheduleAutoBackup = scheduleAutoBackup;
   if(typeof updateSyncDot === "function") window.updateSyncDot = updateSyncDot;
   if(typeof startFirebaseSync === "function") window.startFirebaseSync = startFirebaseSync;
+  // Both are `async function`, which the original export sweep missed. They are
+  // called from inline markup handlers, and once this file becomes an ES module
+  // its top-level declarations stop being global — only these assignments keep
+  // those buttons alive.
+  if(typeof pushToFirebase === "function") window.pushToFirebase = pushToFirebase;
+  if(typeof runDailyBackup === "function") window.runDailyBackup = runDailyBackup;
+  if(typeof renderScreen === "function") window.renderScreen = renderScreen;
+  if(typeof showScreenError === "function") window.showScreenError = showScreenError;
+  if(typeof clearScreenError === "function") window.clearScreenError = clearScreenError;
+  // applyProdRefresh is reached from the badge's inline onclick, so it has to
+  // be on window like every other handler in this file.
+  if(typeof applyProdRefresh === "function") window.applyProdRefresh = applyProdRefresh;
+  if(typeof prodFingerprint === "function") window.prodFingerprint = prodFingerprint;
+  if(typeof markProdSeen === "function") window.markProdSeen = markProdSeen;
+  if(typeof showProdRefresh === "function") window.showProdRefresh = showProdRefresh;
   if(typeof persist === "function") window.persist = persist;
   if(typeof uid === "function") window.uid = uid;
   if(typeof fmt === "function") window.fmt = fmt;
@@ -5162,7 +5177,7 @@ try{
   if(typeof clearDoc === "function") window.clearDoc = clearDoc;
   if(typeof loadState === "function") window.loadState = loadState;
   console.log('Factory OS ready');
-});
+})();
 
 // ── BOOT CLOUD SYNC ──
 // supabase-js and supabase-db.js are loaded by index.html before this
