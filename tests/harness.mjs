@@ -5,6 +5,7 @@
 // can exit (app.js installs a 60s rollover interval at load).
 
 import vm from 'node:vm';
+import esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +19,26 @@ const read = (p) => {
   const src = fs.readFileSync(path.join(ROOT, p), 'utf8');
   return process.env.STRICT ? '"use strict";\n' + src : src;
 };
+
+// Shared-logic modules, in the order main.js imports them.
+const CORE_MODULES = ['src/js/core/config.js', 'src/js/core/format.js'];
+
+// Bundling is memoised: 150+ tests each call boot(), and re-bundling per call
+// would dominate the run time.
+const _bundles = new Map();
+function bundleModule(rel) {
+  if (!_bundles.has(rel)) {
+    const out = esbuild.buildSync({
+      entryPoints: [path.join(ROOT, rel)],
+      bundle: true, format: 'iife', write: false,
+      platform: 'browser', target: 'es2020',
+    });
+    let js = out.outputFiles[0].text;
+    if (process.env.STRICT) js = '"use strict";\n' + js;
+    _bundles.set(rel, js);
+  }
+  return _bundles.get(rel);
+}
 
 export function boot(opts = {}) {
   const {
@@ -73,6 +94,13 @@ export function boot(opts = {}) {
   // Same order as index.html: data layer first, app second.
   vm.runInContext(read('src/js/supabase-db.js'), ctx, { filename: 'supabase-db.js' });
   if (!opts.dbOnly) {
+    // Same graph as main.js. The core modules are ES modules, which a vm
+    // Script cannot evaluate, so esbuild bundles each into a classic script
+    // first — the bundle is what the browser ultimately runs anyway, and the
+    // window bridge in those modules is what app.js reads them through.
+    for (const mod of CORE_MODULES) {
+      vm.runInContext(bundleModule(mod), ctx, { filename: mod });
+    }
     vm.runInContext(read('src/js/app.js'), ctx, { filename: 'app.js' });
   }
 

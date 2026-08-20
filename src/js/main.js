@@ -22,5 +22,10 @@
 //  and shared-logic modules will be hung off as app.js is broken up.
 // ══════════════════════════════════════════════════════════════════
 
+// Shared logic first — app.js reads these through the window bridge described
+// in each module, so they must be evaluated before it.
+import './core/config.js';
+import './core/format.js';
+
 import './supabase-db.js';
 import './app.js';
