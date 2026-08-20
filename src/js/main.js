@@ -27,6 +27,7 @@
 import './core/config.js';
 import './core/format.js';
 import './core/state.js';
+import './core/calc.js';
 
 import './supabase-db.js';
 import './app.js';
