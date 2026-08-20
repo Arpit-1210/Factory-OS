@@ -25,23 +25,37 @@ const CORE_MODULES = [
   'src/js/core/config.js',
   'src/js/core/format.js',
   'src/js/core/state.js',
+  'src/js/core/calc.js',
 ];
 
-// Bundling is memoised: 150+ tests each call boot(), and re-bundling per call
-// would dominate the run time.
-const _bundles = new Map();
-function bundleModule(rel) {
-  if (!_bundles.has(rel)) {
+/**
+ * Bundle the whole core graph as ONE unit, exactly as Vite does for the
+ * browser.
+ *
+ * Bundling each module separately looks equivalent and is not: esbuild inlines
+ * each entry's dependencies, so calc.js would carry its own private copy of
+ * state.js — a second `S`, a second seeded catalogue, and two window bridges
+ * racing to publish. Tests still passed, because the last bridge write won and
+ * everything happened to funnel through that instance. That is precisely the
+ * kind of test/production divergence worth refusing: the browser has one
+ * instance of each module and the tests must too.
+ *
+ * Memoised — 150+ tests each call boot(), and re-bundling per call would
+ * dominate the run.
+ */
+let _coreBundle = null;
+function bundleCore() {
+  if (_coreBundle === null) {
+    const entry = CORE_MODULES.map(m => `import ${JSON.stringify('./' + m)};`).join('\n');
     const out = esbuild.buildSync({
-      entryPoints: [path.join(ROOT, rel)],
+      stdin: { contents: entry, resolveDir: ROOT, loader: 'js' },
       bundle: true, format: 'iife', write: false,
       platform: 'browser', target: 'es2020',
     });
-    let js = out.outputFiles[0].text;
-    if (process.env.STRICT) js = '"use strict";\n' + js;
-    _bundles.set(rel, js);
+    _coreBundle = out.outputFiles[0].text;
+    if (process.env.STRICT) _coreBundle = '"use strict";\n' + _coreBundle;
   }
-  return _bundles.get(rel);
+  return _coreBundle;
 }
 
 export function boot(opts = {}) {
@@ -98,13 +112,11 @@ export function boot(opts = {}) {
   // Same order as index.html: data layer first, app second.
   vm.runInContext(read('src/js/supabase-db.js'), ctx, { filename: 'supabase-db.js' });
   if (!opts.dbOnly) {
-    // Same graph as main.js. The core modules are ES modules, which a vm
-    // Script cannot evaluate, so esbuild bundles each into a classic script
-    // first — the bundle is what the browser ultimately runs anyway, and the
-    // window bridge in those modules is what app.js reads them through.
-    for (const mod of CORE_MODULES) {
-      vm.runInContext(bundleModule(mod), ctx, { filename: mod });
-    }
+    // Same graph as main.js. Core modules are ES modules, which a vm Script
+    // cannot evaluate, so esbuild bundles them into one classic script first —
+    // which is what the browser runs anyway. app.js reads them through the
+    // window bridge those modules install.
+    vm.runInContext(bundleCore(), ctx, { filename: 'core-bundle.js' });
     vm.runInContext(read('src/js/app.js'), ctx, { filename: 'app.js' });
   }
 
