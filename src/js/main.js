@@ -26,6 +26,7 @@
 // in each module, so they must be evaluated before it.
 import './core/config.js';
 import './core/format.js';
+import './core/state.js';
 
 import './supabase-db.js';
 import './app.js';
