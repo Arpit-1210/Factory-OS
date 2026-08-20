@@ -1802,12 +1802,84 @@ function startFirebaseSync(){
     const sid = (document.querySelector('.screen.active')||{}).id;
     if(sid && sid !== 'sc-sup'){
       try{ go(sid.replace('sc-','')); }catch(e){}
+    }else if(sid === 'sc-sup'){
+      // The data HAS arrived and is already in S — only the paint is withheld.
+      // Silently swallowing it is what made a phone entry look like it never
+      // reached the laptop, so offer it instead of dropping it.
+      try{ if(prodFingerprint() !== _prodSeen) showProdRefresh(); }catch(e){}
     }
   });
 }
 
 function stopFirebaseSync(){
   if(fbEnabled) FactoryDB.stopSync();
+}
+
+// ── "NEW DATA" BADGE FOR THE PRODUCTION SCREEN ──
+// Everywhere else a remote change simply re-renders the screen. Production
+// cannot: a repaint mid-entry resets the selected team and wipes half-typed
+// inputs. So we compare what the screen last drew against what is now in
+// state, and if they differ we show a badge that lets the user take the
+// update at a moment that suits them.
+
+// Identity of the production data as far as the user can see it. Sessions and
+// teams are sorted because the rows come back from Postgres in no guaranteed
+// order, and an order change alone must not look like new data.
+function prodFingerprint(){
+  try{
+    return JSON.stringify(
+      (S.sessions||[]).slice()
+        .sort(function(a,b){ return (a.supId||0)-(b.supId||0); })
+        .map(function(ss){
+          return [ss.supId, (ss.teams||[]).slice()
+            .sort(function(a,b){ return (a.teamId||0)-(b.teamId||0); })
+            .map(function(t){
+              return [t.teamId, t.stage, (t.team||[]).length,
+                      (t.production||[]).map(function(p){
+                        return [p.name, p.qty, p.value];
+                      })];
+            })];
+        }));
+  }catch(e){ return ''; }
+}
+
+var _prodSeen = null;
+
+// Call wherever the user has just been shown the current production state.
+// persist() covers every local edit, and go() covers every navigation, so a
+// badge can only survive when the change genuinely came from another device.
+function markProdSeen(){
+  _prodSeen = prodFingerprint();
+  var b = document.getElementById('prod-refresh');
+  if(b) b.style.display = 'none';
+}
+
+function showProdRefresh(){
+  var b = document.getElementById('prod-refresh');
+  if(!b){
+    b = document.createElement('div');
+    b.id = 'prod-refresh';
+    b.setAttribute('onclick','applyProdRefresh()');
+    b.style.cssText =
+      'position:fixed;left:50%;transform:translateX(-50%);'+
+      'bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:9999;'+
+      'display:flex;align-items:center;gap:8px;cursor:pointer;'+
+      'padding:10px 16px;border-radius:999px;border:none;'+
+      'background:var(--jade,#059669);color:#fff;font-size:13px;font-weight:600;'+
+      'box-shadow:0 6px 20px rgba(0,0,0,.22)';
+    b.innerHTML = '<span>🔄</span><span>New production data — tap to refresh</span>';
+    document.body.appendChild(b);
+  }
+  b.style.display = 'flex';
+}
+
+// Repaint the production screen WITHOUT kicking the user back to the
+// supervisor picker, unless the session they were in has gone away remotely.
+function applyProdRefresh(){
+  var sess = activeSupId !== null &&
+             (S.sessions||[]).find(function(ss){ return ss.supId === activeSupId; });
+  if(sess) renderSupWork(); else exitSup();
+  markProdSeen();
 }
 
 // Daily backups are Postgres point-in-time recovery now. The old version
@@ -1830,6 +1902,9 @@ function pushAttendanceLive(){
 
 function persist(){
   try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
+  // A local edit always repaints, so whatever had arrived remotely is on
+  // screen now — the "new data" badge has nothing left to offer.
+  try{ markProdSeen(); }catch(e){}
   if(fbEnabled&&db){
     clearTimeout(persist._fbTimer);
     persist._fbTimer=setTimeout(pushToFirebase,2000);
