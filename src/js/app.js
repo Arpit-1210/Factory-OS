@@ -1359,30 +1359,86 @@ function go(name){
   });
   // Close mobile sidebar
   closeSidebar();
-  // Render screen
-  if(name==='setup') renderSetup();
-  if(name==='sheets') renderSheets();
-  if(name==='att') renderAtt();
-  if(name==='sup') renderSupLogin();
-  if(name==='raw') renderRaw();
-  if(name==='day') renderDay();
-  if(name==='month') initMonthly();
-  // Close sidebar on mobile after navigation
   if(window.innerWidth<=768) closeSidebar();
 
-  if(name==='orders') renderOrders();
-  if(name==='payments') renderPayments();
-  if(name==='dispatch') renderDispatch();
-  if(name==='transfers') renderUnitTransfers();
-  if(name==='salary'){ renderSalary(); }
-  if(name==='export') renderExportPage();
-  if(name==='bom') renderBOM();
-  if(name==='inventory') renderInventory();
-  if(name==='stock') renderStock();
-  if(name==='rmpurchase') renderRMPurchase();
-  if(name==='fgstock') renderFGStock();
-  if(name==='dashboard') renderDashboard();
-  if(name==='docs') renderDocs();
+  // Render the screen through the error boundary — see renderScreen().
+  renderScreen(name);
+
+  // Navigating repaints the target screen, and leaving the production screen
+  // makes a pending-update badge meaningless — either way it is now seen.
+  try{ markProdSeen(); }catch(e){}
+}
+
+// ── SCREEN RENDER DISPATCH + ERROR BOUNDARY ──
+// Every screen renders through here so that a render failure is VISIBLE.
+//
+// This used to be twenty bare `if(name==='x') renderX();` lines. One throw
+// killed the rest of go() and left the screen blank, with nothing in the UI
+// to say why. Three real bugs hid behind that: renderSupLogin and
+// renderRawPnL crashed on the current session shape, and renderUnitTransfers
+// has never existed at all. The Raw Material blank screen was reported as
+// "production sync is not connected to the backend" — the wrong subsystem
+// entirely, because a dead screen and a dead sync look identical.
+//
+// Renderers are referenced lazily by name rather than captured in a map, so a
+// missing one surfaces here as a caught error instead of a ReferenceError at
+// load time.
+const SCREEN_RENDERERS = {
+  setup:'renderSetup',        sheets:'renderSheets',    att:'renderAtt',
+  sup:'renderSupLogin',       raw:'renderRaw',          day:'renderDay',
+  month:'initMonthly',        orders:'renderOrders',    payments:'renderPayments',
+  dispatch:'renderDispatch',  transfers:'renderUnitTransfers',
+  salary:'renderSalary',      export:'renderExportPage', bom:'renderBOM',
+  inventory:'renderInventory',stock:'renderStock',      rmpurchase:'renderRMPurchase',
+  fgstock:'renderFGStock',    dashboard:'renderDashboard', docs:'renderDocs',
+};
+
+function renderScreen(name){
+  const fnName = SCREEN_RENDERERS[name];
+  if(!fnName) return;
+  const fn = window[fnName];
+  if(typeof fn !== 'function'){
+    showScreenError(name, new Error(fnName+'() is not defined — this screen was never implemented'));
+    return;
+  }
+  try{
+    clearScreenError(name);
+    fn();
+  }catch(err){
+    showScreenError(name, err);
+  }
+}
+
+function screenErrorEl(name){
+  return document.getElementById('screen-error-'+name);
+}
+
+function clearScreenError(name){
+  const el = screenErrorEl(name);
+  if(el) el.remove();
+}
+
+// A banner is PREPENDED rather than replacing the screen: a renderer that
+// throws half way through still leaves useful content on the page.
+function showScreenError(name, err){
+  console.error('[screen:'+name+']', err);
+  const sc = document.getElementById('sc-'+name);
+  if(!sc) return;
+  clearScreenError(name);
+  const box = document.createElement('div');
+  box.id = 'screen-error-'+name;
+  box.style.cssText =
+    'margin:12px 0;padding:14px 16px;border-radius:10px;'+
+    'border:1px solid #FCA5A5;background:#FEF2F2;color:#991B1B;'+
+    'font-size:13px;line-height:1.5';
+  box.innerHTML =
+    '<div style="font-weight:700;margin-bottom:4px">⚠ This screen failed to load</div>'+
+    '<div style="margin-bottom:6px">Your saved data is safe — this is a display fault, '+
+    'not a sync problem. Please report it with the detail below.</div>'+
+    '<code style="display:block;font-family:var(--mono);font-size:11px;'+
+    'background:rgba(0,0,0,.05);padding:6px 8px;border-radius:6px;overflow-x:auto">'+
+    String((err && err.message) || err)+'</code>';
+  sc.insertBefore(box, sc.firstChild);
 }
 
 // ════ DASHBOARD ════
