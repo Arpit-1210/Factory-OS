@@ -1359,30 +1359,86 @@ function go(name){
   });
   // Close mobile sidebar
   closeSidebar();
-  // Render screen
-  if(name==='setup') renderSetup();
-  if(name==='sheets') renderSheets();
-  if(name==='att') renderAtt();
-  if(name==='sup') renderSupLogin();
-  if(name==='raw') renderRaw();
-  if(name==='day') renderDay();
-  if(name==='month') initMonthly();
-  // Close sidebar on mobile after navigation
   if(window.innerWidth<=768) closeSidebar();
 
-  if(name==='orders') renderOrders();
-  if(name==='payments') renderPayments();
-  if(name==='dispatch') renderDispatch();
-  if(name==='transfers') renderUnitTransfers();
-  if(name==='salary'){ renderSalary(); }
-  if(name==='export') renderExportPage();
-  if(name==='bom') renderBOM();
-  if(name==='inventory') renderInventory();
-  if(name==='stock') renderStock();
-  if(name==='rmpurchase') renderRMPurchase();
-  if(name==='fgstock') renderFGStock();
-  if(name==='dashboard') renderDashboard();
-  if(name==='docs') renderDocs();
+  // Render the screen through the error boundary — see renderScreen().
+  renderScreen(name);
+
+  // Navigating repaints the target screen, and leaving the production screen
+  // makes a pending-update badge meaningless — either way it is now seen.
+  try{ markProdSeen(); }catch(e){}
+}
+
+// ── SCREEN RENDER DISPATCH + ERROR BOUNDARY ──
+// Every screen renders through here so that a render failure is VISIBLE.
+//
+// This used to be twenty bare `if(name==='x') renderX();` lines. One throw
+// killed the rest of go() and left the screen blank, with nothing in the UI
+// to say why. Three real bugs hid behind that: renderSupLogin and
+// renderRawPnL crashed on the current session shape, and renderUnitTransfers
+// has never existed at all. The Raw Material blank screen was reported as
+// "production sync is not connected to the backend" — the wrong subsystem
+// entirely, because a dead screen and a dead sync look identical.
+//
+// Renderers are referenced lazily by name rather than captured in a map, so a
+// missing one surfaces here as a caught error instead of a ReferenceError at
+// load time.
+const SCREEN_RENDERERS = {
+  setup:'renderSetup',        sheets:'renderSheets',    att:'renderAtt',
+  sup:'renderSupLogin',       raw:'renderRaw',          day:'renderDay',
+  month:'initMonthly',        orders:'renderOrders',    payments:'renderPayments',
+  dispatch:'renderDispatch',  transfers:'renderUnitTransfers',
+  salary:'renderSalary',      export:'renderExportPage', bom:'renderBOM',
+  inventory:'renderInventory',stock:'renderStock',      rmpurchase:'renderRMPurchase',
+  fgstock:'renderFGStock',    dashboard:'renderDashboard', docs:'renderDocs',
+};
+
+function renderScreen(name){
+  const fnName = SCREEN_RENDERERS[name];
+  if(!fnName) return;
+  const fn = window[fnName];
+  if(typeof fn !== 'function'){
+    showScreenError(name, new Error(fnName+'() is not defined — this screen was never implemented'));
+    return;
+  }
+  try{
+    clearScreenError(name);
+    fn();
+  }catch(err){
+    showScreenError(name, err);
+  }
+}
+
+function screenErrorEl(name){
+  return document.getElementById('screen-error-'+name);
+}
+
+function clearScreenError(name){
+  const el = screenErrorEl(name);
+  if(el) el.remove();
+}
+
+// A banner is PREPENDED rather than replacing the screen: a renderer that
+// throws half way through still leaves useful content on the page.
+function showScreenError(name, err){
+  console.error('[screen:'+name+']', err);
+  const sc = document.getElementById('sc-'+name);
+  if(!sc) return;
+  clearScreenError(name);
+  const box = document.createElement('div');
+  box.id = 'screen-error-'+name;
+  box.style.cssText =
+    'margin:12px 0;padding:14px 16px;border-radius:10px;'+
+    'border:1px solid #FCA5A5;background:#FEF2F2;color:#991B1B;'+
+    'font-size:13px;line-height:1.5';
+  box.innerHTML =
+    '<div style="font-weight:700;margin-bottom:4px">⚠ This screen failed to load</div>'+
+    '<div style="margin-bottom:6px">Your saved data is safe — this is a display fault, '+
+    'not a sync problem. Please report it with the detail below.</div>'+
+    '<code style="display:block;font-family:var(--mono);font-size:11px;'+
+    'background:rgba(0,0,0,.05);padding:6px 8px;border-radius:6px;overflow-x:auto">'+
+    String((err && err.message) || err)+'</code>';
+  sc.insertBefore(box, sc.firstChild);
 }
 
 // ════ DASHBOARD ════
@@ -1802,12 +1858,84 @@ function startFirebaseSync(){
     const sid = (document.querySelector('.screen.active')||{}).id;
     if(sid && sid !== 'sc-sup'){
       try{ go(sid.replace('sc-','')); }catch(e){}
+    }else if(sid === 'sc-sup'){
+      // The data HAS arrived and is already in S — only the paint is withheld.
+      // Silently swallowing it is what made a phone entry look like it never
+      // reached the laptop, so offer it instead of dropping it.
+      try{ if(prodFingerprint() !== _prodSeen) showProdRefresh(); }catch(e){}
     }
   });
 }
 
 function stopFirebaseSync(){
   if(fbEnabled) FactoryDB.stopSync();
+}
+
+// ── "NEW DATA" BADGE FOR THE PRODUCTION SCREEN ──
+// Everywhere else a remote change simply re-renders the screen. Production
+// cannot: a repaint mid-entry resets the selected team and wipes half-typed
+// inputs. So we compare what the screen last drew against what is now in
+// state, and if they differ we show a badge that lets the user take the
+// update at a moment that suits them.
+
+// Identity of the production data as far as the user can see it. Sessions and
+// teams are sorted because the rows come back from Postgres in no guaranteed
+// order, and an order change alone must not look like new data.
+function prodFingerprint(){
+  try{
+    return JSON.stringify(
+      (S.sessions||[]).slice()
+        .sort(function(a,b){ return (a.supId||0)-(b.supId||0); })
+        .map(function(ss){
+          return [ss.supId, (ss.teams||[]).slice()
+            .sort(function(a,b){ return (a.teamId||0)-(b.teamId||0); })
+            .map(function(t){
+              return [t.teamId, t.stage, (t.team||[]).length,
+                      (t.production||[]).map(function(p){
+                        return [p.name, p.qty, p.value];
+                      })];
+            })];
+        }));
+  }catch(e){ return ''; }
+}
+
+var _prodSeen = null;
+
+// Call wherever the user has just been shown the current production state.
+// persist() covers every local edit, and go() covers every navigation, so a
+// badge can only survive when the change genuinely came from another device.
+function markProdSeen(){
+  _prodSeen = prodFingerprint();
+  var b = document.getElementById('prod-refresh');
+  if(b) b.style.display = 'none';
+}
+
+function showProdRefresh(){
+  var b = document.getElementById('prod-refresh');
+  if(!b){
+    b = document.createElement('div');
+    b.id = 'prod-refresh';
+    b.setAttribute('onclick','applyProdRefresh()');
+    b.style.cssText =
+      'position:fixed;left:50%;transform:translateX(-50%);'+
+      'bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:9999;'+
+      'display:flex;align-items:center;gap:8px;cursor:pointer;'+
+      'padding:10px 16px;border-radius:999px;border:none;'+
+      'background:var(--jade,#059669);color:#fff;font-size:13px;font-weight:600;'+
+      'box-shadow:0 6px 20px rgba(0,0,0,.22)';
+    b.innerHTML = '<span>🔄</span><span>New production data — tap to refresh</span>';
+    document.body.appendChild(b);
+  }
+  b.style.display = 'flex';
+}
+
+// Repaint the production screen WITHOUT kicking the user back to the
+// supervisor picker, unless the session they were in has gone away remotely.
+function applyProdRefresh(){
+  var sess = activeSupId !== null &&
+             (S.sessions||[]).find(function(ss){ return ss.supId === activeSupId; });
+  if(sess) renderSupWork(); else exitSup();
+  markProdSeen();
 }
 
 // Daily backups are Postgres point-in-time recovery now. The old version
@@ -1830,6 +1958,9 @@ function pushAttendanceLive(){
 
 function persist(){
   try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
+  // A local edit always repaints, so whatever had arrived remotely is on
+  // screen now — the "new data" badge has nothing left to offer.
+  try{ markProdSeen(); }catch(e){}
   if(fbEnabled&&db){
     clearTimeout(persist._fbTimer);
     persist._fbTimer=setTimeout(pushToFirebase,2000);
@@ -2131,6 +2262,29 @@ function updAttMet(){
   document.getElementById('a-total-lab').textContent=fmt(bw+ot);
 }
 
+// ── SESSION SHAPE — read every session through these ──
+// Sessions have carried teams[] since the multi-team rework. enterSup()
+// migrates a legacy single-team session when it is OPENED, but screens also
+// render sessions nobody has opened — one logged on another device, most
+// importantly. Reading ss.team / ss.production directly therefore throws on
+// every current-shape session. That killed the active-session list on the
+// Production screen and the whole Raw Material screen, both of which looked
+// like "the sync is broken" rather than a render crash.
+function sessionTeams(ss){
+  if(!ss) return [];
+  if(ss.teams) return ss.teams;
+  if(ss.team || ss.production){
+    return [{teamId:1, stage:ss.stage, team:ss.team||[], production:ss.production||[]}];
+  }
+  return [];
+}
+function sessionProduction(ss){
+  return sessionTeams(ss).reduce(function(a,t){ return a.concat(t.production||[]); },[]);
+}
+function sessionMembers(ss){
+  return sessionTeams(ss).reduce(function(a,t){ return a.concat(t.team||[]); },[]);
+}
+
 function renderSupLogin(){
   // Show pending/in-production orders as task list for supervisors
   const ob = document.getElementById('sup-orders-banner');
@@ -2157,7 +2311,14 @@ function renderSupLogin(){
   g.innerHTML=sups.map(s=>{const h=!!S.sessions.find(ss=>ss.supId===s.id);return`<div class="sc ${h?'has-s':''}" onclick="enterSup(${s.id})"><div class="sc-ic">👷</div><div class="sc-nm">${s.name}</div><div class="sc-rl">${s.role} · ${fmt(s.wage)}/day</div><div class="sc-st" style="color:${h?'var(--jade)':'var(--fog)'}">${h?'✓ Session active':'Tap to start'}</div></div>`;}).join('');
   const sl=document.getElementById('sup-sess-list');
   if(!S.sessions.length){sl.innerHTML='<div style="color:#6B7280;font-size:12px">No active sessions yet.</div>';return;}
-  sl.innerHTML=S.sessions.map(ss=>{const lc=ss.team.reduce((a,m)=>a+m.wage,0)+ss.supWage;const gv=ss.production.reduce((a,p)=>a+p.value,0);return`<div class="tp"><div class="tph"><div><span class="tpn">${ss.supName}</span>&nbsp;${`<span class=\"sp sp${STAGES.indexOf(ss.stage)}\">" + ss.stage + "</span>`}</div><div style="display:flex;gap:6px;align-items:center"><span style="font-family:var(--mono);font-size:10px;color:var(--dust)">${ss.team.length} workers · ${fmt(lc)}/day</span><button class="btn btn-ember btn-xs" onclick="delSess(${ss.supId})">✕</button></div></div><div style="font-size:11px;color:var(--dust)">Team: ${ss.team.map(m=>m.name).join(', ')||'—'}</div>${ss.production.length?`<div style="font-size:11px;color:var(--jade);margin-top:4px;font-family:var(--mono)">Produced: ${ss.production.map(p=>`${p.qty}× ${p.name}`).join(' | ')} = ${fmt(gv)}</div>`:'<div style="font-size:11px;color:var(--fog);margin-top:4px">No production logged yet</div>'}</div>`;}).join('');
+  sl.innerHTML=S.sessions.map(ss=>{
+    const teams   = sessionTeams(ss);
+    const members = sessionMembers(ss);
+    const prod    = sessionProduction(ss);
+    const lc      = members.reduce((a,m)=>a+(m.wage||0),0)+(ss.supWage||0);
+    const gv      = prod.reduce((a,p)=>a+(p.value||0),0);
+    const stages  = [...new Set(teams.map(t=>t.stage).filter(Boolean))];
+    return`<div class="tp"><div class="tph"><div><span class="tpn">${ss.supName}</span>&nbsp;${stages.map(spBadge).join(' ')}</div><div style="display:flex;gap:6px;align-items:center"><span style="font-family:var(--mono);font-size:10px;color:var(--dust)">${members.length} workers · ${fmt(lc)}/day</span><button class="btn btn-ember btn-xs" onclick="delSess(${ss.supId})">✕</button></div></div><div style="font-size:11px;color:var(--dust)">Team: ${members.map(m=>m.name).join(', ')||'—'}</div>${prod.length?`<div style="font-size:11px;color:var(--jade);margin-top:4px;font-family:var(--mono)">Produced: ${prod.map(p=>`${p.qty}× ${p.name}`).join(' | ')} = ${fmt(gv)}</div>`:'<div style="font-size:11px;color:var(--fog);margin-top:4px">No production logged yet</div>'}</div>`;}).join('');
 }
 
 function delSess(id){
@@ -2523,9 +2684,9 @@ function issueRaw(){const stg=document.getElementById('raw-stg').value;const ms=
 
 function delRaw(id){S.rawLog=S.rawLog.filter(r=>r.id!==id);persist();renderRawLog();renderRawPnL();}
 
-function renderRawLog(){const el=document.getElementById('raw-log');if(!S.rawLog.length){el.innerHTML='<div style="color:#6B7280;font-size:12px">Nothing issued yet.</div>';return;}el.innerHTML=`<table class="tbl"><thead><tr><th>Stage</th><th>Material</th><th class="num">Qty</th><th class="num">₹/unit</th><th class="num">Total</th><th></th></tr></thead><tbody>${S.rawLog.map(r=>`<tr><td>${`<span class=\"sp sp${STAGES.indexOf(r.stage)}\">" + r.stage + "</span>`}</td><td style="font-weight:500;color:#111827">${r.name}</td><td class="num">${r.qty} ${r.unit}</td><td class="num">${fmtN(r.unitPrice)}</td><td class="num">${fmtN(r.cost)}</td><td><button class="btn btn-ember btn-xs" onclick="delRaw(${r.id})">✕</button></td></tr>`).join('')}</tbody></table>`;}
+function renderRawLog(){const el=document.getElementById('raw-log');if(!S.rawLog.length){el.innerHTML='<div style="color:#6B7280;font-size:12px">Nothing issued yet.</div>';return;}el.innerHTML=`<table class="tbl"><thead><tr><th>Stage</th><th>Material</th><th class="num">Qty</th><th class="num">₹/unit</th><th class="num">Total</th><th></th></tr></thead><tbody>${S.rawLog.map(r=>`<tr><td>${spBadge(r.stage)}</td><td style="font-weight:500;color:#111827">${r.name}</td><td class="num">${r.qty} ${r.unit}</td><td class="num">${fmtN(r.unitPrice)}</td><td class="num">${fmtN(r.cost)}</td><td><button class="btn btn-ember btn-xs" onclick="delRaw(${r.id})">✕</button></td></tr>`).join('')}</tbody></table>`;}
 
-function renderRawPnL(){const t=S.rawLog.reduce((a,r)=>a+r.cost,0);const g=S.sessions.reduce((a,ss)=>a+ss.production.reduce((b,p)=>b+p.value,0),0);const profit=g-t;document.getElementById('raw-pnl').innerHTML=`<div class="mrow"><div class="met m-blue"><div class="ml">All Goods</div><div class="mv w">${fmt(g)}</div></div><div class="met m-red"><div class="ml">RM Cost</div><div class="mv r">${fmt(t)}</div></div><div class="met ${profit>=0?'m-green':'m-red'}"><div class="ml">RM Supervisor Net</div><div class="mv ${profit>=0?'g':'r'}">${fmt(profit)}</div></div></div>`;}
+function renderRawPnL(){const t=S.rawLog.reduce((a,r)=>a+r.cost,0);const g=S.sessions.reduce((a,ss)=>a+sessionProduction(ss).reduce((b,p)=>b+(p.value||0),0),0);const profit=g-t;document.getElementById('raw-pnl').innerHTML=`<div class="mrow"><div class="met m-blue"><div class="ml">All Goods</div><div class="mv w">${fmt(g)}</div></div><div class="met m-red"><div class="ml">RM Cost</div><div class="mv r">${fmt(t)}</div></div><div class="met ${profit>=0?'m-green':'m-red'}"><div class="ml">RM Supervisor Net</div><div class="mv ${profit>=0?'g':'r'}">${fmt(profit)}</div></div></div>`;}
 
 function renderDay(){
   const d=new Date(S.workDate+'T00:00:00');
@@ -4852,6 +5013,21 @@ try{
   if(typeof scheduleAutoBackup === "function") window.scheduleAutoBackup = scheduleAutoBackup;
   if(typeof updateSyncDot === "function") window.updateSyncDot = updateSyncDot;
   if(typeof startFirebaseSync === "function") window.startFirebaseSync = startFirebaseSync;
+  // Both are `async function`, which the original export sweep missed. They are
+  // called from inline markup handlers, and once this file becomes an ES module
+  // its top-level declarations stop being global — only these assignments keep
+  // those buttons alive.
+  if(typeof pushToFirebase === "function") window.pushToFirebase = pushToFirebase;
+  if(typeof runDailyBackup === "function") window.runDailyBackup = runDailyBackup;
+  if(typeof renderScreen === "function") window.renderScreen = renderScreen;
+  if(typeof showScreenError === "function") window.showScreenError = showScreenError;
+  if(typeof clearScreenError === "function") window.clearScreenError = clearScreenError;
+  // applyProdRefresh is reached from the badge's inline onclick, so it has to
+  // be on window like every other handler in this file.
+  if(typeof applyProdRefresh === "function") window.applyProdRefresh = applyProdRefresh;
+  if(typeof prodFingerprint === "function") window.prodFingerprint = prodFingerprint;
+  if(typeof markProdSeen === "function") window.markProdSeen = markProdSeen;
+  if(typeof showProdRefresh === "function") window.showProdRefresh = showProdRefresh;
   if(typeof persist === "function") window.persist = persist;
   if(typeof uid === "function") window.uid = uid;
   if(typeof fmt === "function") window.fmt = fmt;
@@ -5001,7 +5177,7 @@ try{
   if(typeof clearDoc === "function") window.clearDoc = clearDoc;
   if(typeof loadState === "function") window.loadState = loadState;
   console.log('Factory OS ready');
-});
+})();
 
 // ── BOOT CLOUD SYNC ──
 // supabase-js and supabase-db.js are loaded by index.html before this

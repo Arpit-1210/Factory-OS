@@ -11,7 +11,13 @@ import { fileURLToPath } from 'node:url';
 import { createDocument, createElement, createLocalStorage } from './dom-stub.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+// STRICT=1 evaluates the app under strict mode, which is what ES modules
+// would impose. Used to prove the codebase is ready for a module split before
+// committing to one.
+const read = (p) => {
+  const src = fs.readFileSync(path.join(ROOT, p), 'utf8');
+  return process.env.STRICT ? '"use strict";\n' + src : src;
+};
 
 export function boot(opts = {}) {
   const {
