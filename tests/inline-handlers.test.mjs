@@ -19,7 +19,21 @@ import { fileURLToPath } from 'node:url';
 import { boot } from './harness.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SRC = fs.readFileSync(path.join(ROOT, 'src/js/app.js'), 'utf8');
+const APP = fs.readFileSync(path.join(ROOT, 'src/js/app.js'), 'utf8');
+
+// Markup now lives in two places: the static per-screen templates, and the
+// render functions in app.js that build rows and cards as strings. Both carry
+// inline handlers, so both must be scanned — when the static blob moved into
+// templates/, scanning app.js alone found zero handlers and this suite caught
+// it rather than silently passing on an empty set.
+const TEMPLATE_DIR = path.join(ROOT, 'src/js/templates');
+function templateSources(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+    e.isDirectory() ? templateSources(path.join(dir, e.name))
+    : e.name.endsWith('.js') ? [fs.readFileSync(path.join(dir, e.name), 'utf8')] : []);
+}
+const MARKUP = [APP, ...templateSources(TEMPLATE_DIR)].join('\n');
+const SRC = APP;   // definitions and window exports still live in app.js
 
 /** Function names invoked from an inline handler attribute in the markup. */
 function handlersInMarkup(src) {
@@ -56,7 +70,7 @@ const NOT_APP_CODE = new Set([
   'Number', 'String', 'Boolean', 'Array', 'Object', 'Math', 'JSON', 'Date',
 ]);
 
-const HANDLERS = [...handlersInMarkup(SRC)].filter(h => !NOT_APP_CODE.has(h));
+const HANDLERS = [...handlersInMarkup(MARKUP)].filter(h => !NOT_APP_CODE.has(h));
 const DEFINED = definedInSource(SRC);
 const EXPORTED = exportedToWindow(SRC);
 
