@@ -26,6 +26,7 @@ const CORE_MODULES = [
   'src/js/core/format.js',
   'src/js/core/state.js',
   'src/js/core/calc.js',
+  'src/js/templates/index.js',
 ];
 
 /**
