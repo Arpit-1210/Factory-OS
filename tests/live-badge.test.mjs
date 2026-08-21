@@ -178,13 +178,24 @@ describe('applyProdRefresh — taking the update', () => {
   test('falls back to the supervisor picker if the open session vanished remotely', () => {
     // Another device deleted the session being edited. Re-rendering the team
     // view would leave the screen frozen on data that no longer exists.
+    //
+    // activeSupId is module-scoped inside screens/production.js now, so this
+    // drives the real entry point (enterSup) and asserts what the user sees,
+    // rather than poking the variable. That is the better test regardless: the
+    // observable outcome is the picker coming back, not a null in a closure.
     const S = resetState(ctx, { workDate: '2026-08-19' });
-    S.lab = [{ id: 9, name: 'Karan', wage: 800, isSup: true, present: true }];
+    S.lab = [{ id: 9, name: 'Karan', role: 'Supervisor', wage: 800, isSup: true, present: true }];
     S.sessions = [];
-    call(ctx, 'activeSupId = 9');
+    call(ctx, 'enterSup(9)');                     // opens a session for Karan
+    assert.equal(S.sessions.length, 1, 'precondition: a session is open');
 
+    S.sessions.length = 0;                        // the remote pull removed it
     assert.doesNotThrow(() => call(ctx, 'applyProdRefresh()'));
-    assert.equal(call(ctx, 'activeSupId'), null, 'exitSup() clears the dead session');
+
+    assert.equal(win.document.getElementById('sup-login').style.display, 'block',
+      'the supervisor picker is shown again');
+    assert.equal(win.document.getElementById('sup-work').style.display, 'none',
+      'and the dead team view is hidden');
   });
 });
 
