@@ -32,8 +32,22 @@ function templateSources(dir) {
     e.isDirectory() ? templateSources(path.join(dir, e.name))
     : e.name.endsWith('.js') ? [fs.readFileSync(path.join(dir, e.name), 'utf8')] : []);
 }
-const MARKUP = [APP, ...templateSources(TEMPLATE_DIR)].join('\n');
-const SRC = APP;   // definitions and window exports still live in app.js
+// Markup and code are now spread across app.js, the static templates, and
+// every screen module carved out of app.js — screens both define handlers and
+// generate markup that calls them. Scanning app.js alone made each newly
+// extracted screen look like a page full of dead buttons, so both sweeps read
+// the whole tree.
+const CODE_DIRS = ['src/js/core', 'src/js/screens'];
+const codeSources = CODE_DIRS.flatMap(d => {
+  const full = path.join(ROOT, d);
+  return fs.existsSync(full)
+    ? fs.readdirSync(full).filter(f => f.endsWith('.js'))
+        .map(f => fs.readFileSync(path.join(full, f), 'utf8'))
+    : [];
+});
+
+const MARKUP = [APP, ...codeSources, ...templateSources(TEMPLATE_DIR)].join('\n');
+const SRC = [APP, ...codeSources].join('\n');
 
 /** Function names invoked from an inline handler attribute in the markup. */
 function handlersInMarkup(src) {
