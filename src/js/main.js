@@ -28,7 +28,30 @@ import './core/config.js';
 import './core/format.js';
 import './core/state.js';
 import './core/calc.js';
+import './core/session.js';
 import './templates/index.js';
+
+// Screens — each owns its render logic and handlers; its markup lives
+// alongside in templates/screens/.
+import './screens/att.js';
+import './screens/bom.js';
+import './screens/dashboard.js';
+import './screens/day.js';
+import './screens/dispatch.js';
+import './screens/docs.js';
+import './screens/exports.js';
+import './screens/fgstock.js';
+import './screens/inventory.js';
+import './screens/month.js';
+import './screens/orders.js';
+import './screens/payments.js';
+import './screens/production.js';
+import './screens/raw.js';
+import './screens/rmpurchase.js';
+import './screens/salary.js';
+import './screens/setup.js';
+import './screens/sheets.js';
+import './screens/stock.js';
 
 import './supabase-db.js';
 import './app.js';
