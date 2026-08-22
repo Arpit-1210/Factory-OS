@@ -119,8 +119,48 @@ function persist(){
   }
 }
 
-// ── bridge (delete once every caller imports instead) ──
+
+// The Sheets screen offers these next to "Force Sync". They differ from a
+// plain push in that they deal with the offline outbox and with pulling the
+// cloud copy back, which is what an owner actually wants when a device has
+// been off the network or has drifted.
+async function emergencyPush(){
+  if(!fbEnabled){ alert('Not connected to the cloud yet.'); return; }
+  const pending=FactoryDB.pendingWrites();
+  updateSyncDot('syncing');
+  await FactoryDB.flushOutbox();   // queued writes first, or the push races them
+  await pushToFirebase();
+  const left=FactoryDB.pendingWrites();
+  updateSyncDot(left?'err':'ok');
+  alert(left ? `${left} change(s) still queued — check the connection.`
+             : `Pushed. ${pending?pending+' queued change(s) replayed.':'Everything was already up to date.'}`);
+}
+
+async function restoreFromBackup(){
+  if(!fbEnabled){ alert('Not connected to the cloud yet.'); return; }
+  if(FactoryDB.pendingWrites()){
+    // Pulling would overwrite work that never reached Postgres.
+    alert('There are unsynced changes on this device. Push them first, then restore.');
+    return;
+  }
+  if(!confirm('Replace the data on this device with the cloud copy? Local changes that were never synced will be lost.')) return;
+  updateSyncDot('syncing');
+  await pullFromFirebase();
+  updateSyncDot('ok');
+  try{ renderScreen('dashboard'); }catch(e){}
+  alert('Restored from the cloud copy.');
+}
+
+// ── window bridge ──
+// Two things still need these on the global object:
+//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
+//      against `window` and nothing else;
+//   2. app.js, which has no import statements of its own yet.
+// Modules no longer rely on it — screens/ and components/ import from core/
+// directly. Removing the rest means converting the markup to
+// addEventListener, which is its own piece of work.
 Object.assign(window, {
+  emergencyPush, restoreFromBackup,
   updateSyncDot,
   initFirebase,
   pushToFirebase,
