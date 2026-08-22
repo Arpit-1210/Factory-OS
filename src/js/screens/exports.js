@@ -9,6 +9,11 @@
 //  imports as the remaining screens move out of app.js.
 // ==================================================================
 
+import { calcOT, getFGBalance } from '../core/calc.js';
+import { FG_STAGES } from '../core/config.js';
+import { todayStr } from '../core/format.js';
+import { S } from '../core/state.js';
+
 // ════ EXCEL EXPORTS ════
 function renderExportPage(){
   const m=document.getElementById('export-sal-month');
@@ -91,8 +96,43 @@ function exportPnL(){
   downloadXLSX(wb,`PnL_${from}_to_${to}.xlsx`);
 }
 
-// ── bridge (delete once every caller imports instead) ──
+
+// Current position rather than a date range: stock is a snapshot, so the
+// export range pickers do not apply to it.
+function exportInventory(){
+  if(!checkXLSX()) return;
+  const wb=XLSX.utils.book_new();
+
+  const rmRows=[['Material','Unit','Opening','Purchased','Used','Balance','Reorder Level']];
+  (S.stock||[]).forEach(st=>{
+    const purchased=(S.purchases||[]).filter(p=>p.name===st.name).reduce((a,p)=>a+(p.qty||0),0);
+    const usedHistory=(S.ledger||[]).reduce((a,d)=>a+(d.rawLog||[]).filter(r=>r.name===st.name).reduce((b,r)=>b+(r.qty||0),0),0);
+    const usedToday=(S.rawLog||[]).filter(r=>r.name===st.name).reduce((a,r)=>a+(r.qty||0),0);
+    const used=usedHistory+usedToday;
+    rmRows.push([st.name,st.unit||'',st.opening||0,purchased,used,(st.opening||0)+purchased-used,st.reorder||0]);
+  });
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rmRows),'Raw Materials');
+
+  const fgRows=[['Product','Moulding','Finishing','Painting','Packing','Total']];
+  (getAllFGProducts()||[]).forEach(name=>{
+    const per=FG_STAGES.map(st=>getFGBalance(name,st));
+    fgRows.push([name,...per,per.reduce((a,b)=>a+b,0)]);
+  });
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(fgRows),'Finished Goods');
+
+  downloadXLSX(wb,`Inventory_${todayStr()}.xlsx`);
+}
+
+// ── window bridge ──
+// Two things still need these on the global object:
+//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
+//      against `window` and nothing else;
+//   2. app.js, which has no import statements of its own yet.
+// Modules no longer rely on it — screens/ and components/ import from core/
+// directly. Removing the rest means converting the markup to
+// addEventListener, which is its own piece of work.
 Object.assign(window, {
+  exportInventory,
   renderExportPage,
   setExpRange,
   getExpDates,

@@ -48,32 +48,37 @@ describe('go() never dies on a screen that fails', () => {
 });
 
 describe('a missing renderer is reported, not thrown', () => {
-  test('renderUnitTransfers has never existed — the boundary catches it', () => {
-    // Found by this suite: go("transfers") threw ReferenceError, so the whole
-    // Transfers screen was dead for the owner with no visible explanation.
+  // This case was originally exercised by go("transfers"), whose renderer had
+  // never been written. It has since been implemented, so the missing renderer
+  // is now simulated by removing one — which is the better test anyway: it
+  // asserts the boundary's behaviour rather than depending on a live bug.
+  function withMissingRenderer() {
     const h = owner();
-    call(h.ctx, 'go("transfers")');
+    call(h.ctx, 'delete window.renderStock');
+    call(h.ctx, 'go("stock")');
+    return h;
+  }
 
-    const logged = h.logs.error.find(e => String(e[0]) === '[screen:transfers]');
+  test('the boundary catches it instead of letting go() throw', () => {
+    const h = withMissingRenderer();
+    const logged = h.logs.error.find(e => String(e[0]) === '[screen:stock]');
     assert.ok(logged, 'the failure must reach the console for debugging');
     assert.match(String(logged[1].message), /not defined|never implemented/);
   });
 
-  test('and says so on the page', () => {
-    const h = owner();
-    call(h.ctx, 'go("transfers")');
-    const box = bannerIn(h.document, 'transfers');
+  test('and says so on the page, naming the fault', () => {
+    const h = withMissingRenderer();
+    const box = bannerIn(h.document, 'stock');
     assert.ok(box, 'a banner must be inserted into the screen');
     assert.match(box.innerHTML, /failed to load/i);
-    assert.match(box.innerHTML, /renderUnitTransfers/, 'names the actual fault');
+    assert.match(box.innerHTML, /renderStock/, 'names the actual fault');
   });
 
   test('tells the user their data is safe and this is not a sync fault', () => {
     // The whole point: stop a render crash being misreported as a backend
-    // problem, which is what cost the last round of debugging.
-    const h = owner();
-    call(h.ctx, 'go("transfers")');
-    const box = bannerIn(h.document, 'transfers');
+    // problem, which is exactly what happened with the Raw Material screen.
+    const h = withMissingRenderer();
+    const box = bannerIn(h.document, 'stock');
     assert.match(box.innerHTML, /data is safe/i);
     assert.match(box.innerHTML, /not a sync problem/i);
   });

@@ -42,7 +42,7 @@ const fakeSupabase = {
   }),
 };
 
-let win, logs;
+let win, logs, ctx;
 
 before(() => {
   const bundle = esbuild.buildSync({
@@ -76,7 +76,7 @@ before(() => {
   sandbox.globalThis = sandbox;
   sandbox.self = sandbox;
 
-  const ctx = vm.createContext(sandbox);
+  ctx = vm.createContext(sandbox);
   vm.runInContext(bundle, ctx, { filename: 'bundle.js' });
   win = sandbox;
 });
@@ -145,11 +145,26 @@ describe('every screen renders through the real bundle', () => {
     assert.deepEqual(failures, {});
   });
 
-  test('the one screen that was never implemented still reports itself', () => {
+  test('transfers renders too, now that it has been implemented', () => {
+    // It was the last screen with no renderer at all; go("transfers") threw
+    // ReferenceError and the boundary reported it. Both now hold: it renders,
+    // and it leaves no banner behind.
     win.renderScreen('transfers');
     const box = win.document.getElementById('sc-transfers').children
       .find(c => c.id === 'screen-error-transfers');
-    assert.ok(box, 'transfers has no renderer and must say so');
-    assert.match(box.innerHTML, /renderUnitTransfers/);
+    assert.equal(box, undefined);
+  });
+
+  test('a renderer that goes missing is still reported (the check is not vacuous)', () => {
+    // The delete has to run INSIDE the context: vm proxies the sandbox, and
+    // deleting a property on the outer object does not reach the context's
+    // global. Doing it from outside silently no-ops and the test passes
+    // vacuously — which is exactly what this test exists to prevent.
+    vm.runInContext('delete window.renderStock', ctx);
+    win.renderScreen('stock');
+    const box = win.document.getElementById('sc-stock').children
+      .find(c => c.id === 'screen-error-stock');
+    assert.ok(box, 'the boundary must still catch a missing renderer');
+    assert.match(box.innerHTML, /renderStock/);
   });
 });

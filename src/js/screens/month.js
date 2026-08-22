@@ -9,6 +9,10 @@
 //  imports as the remaining screens move out of app.js.
 // ==================================================================
 
+import { MNAMES, STAGES } from '../core/config.js';
+import { fmt, fmtN, spBadge } from '../core/format.js';
+import { S } from '../core/state.js';
+
 function initMonthly(){
   const now=new Date();
   const ms=document.getElementById('m-mon');
@@ -105,7 +109,14 @@ function renderMonthly(){
   document.getElementById('m-sups').innerHTML=Object.values(supM).sort((a,b)=>b.goods-a.goods).map(s=>{const n=s.goods-s.lab;return`<tr><td style="font-weight:600">${s.name}</td><td>${[...s.stages].map(st=>spBadge(st)).join(' ')}</td><td class="num">${s.days}</td><td class="num">${fmtN(s.goods)}</td><td class="num">${fmtN(s.lab)}</td><td class="num ${n>=0?'pv':'lv'}">${fmt(n)}</td></tr>`;}).join('')||`<tr><td colspan="6" style="color:var(--text4);text-align:center">No supervisor data.</td></tr>`;
 }
 
-// ── bridge (delete once every caller imports instead) ──
+// ── window bridge ──
+// Two things still need these on the global object:
+//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
+//      against `window` and nothing else;
+//   2. app.js, which has no import statements of its own yet.
+// Modules no longer rely on it — screens/ and components/ import from core/
+// directly. Removing the rest means converting the markup to
+// addEventListener, which is its own piece of work.
 Object.assign(window, {
   initMonthly,
   prevMonth,

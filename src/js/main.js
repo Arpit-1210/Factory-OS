@@ -38,6 +38,7 @@ import './core/day-rollover.js';
 import './templates/index.js';
 import './components/screen-error.js';
 import './components/sidebar.js';
+import './components/assign-modal.js';
 
 // Screens — each owns its render logic and handlers; its markup lives
 // alongside in templates/screens/.
@@ -60,6 +61,7 @@ import './screens/salary.js';
 import './screens/setup.js';
 import './screens/sheets.js';
 import './screens/stock.js';
+import './screens/transfers.js';
 
 import './supabase-db.js';
 import './app.js';
