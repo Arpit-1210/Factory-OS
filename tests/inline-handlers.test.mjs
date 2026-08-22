@@ -37,7 +37,7 @@ function templateSources(dir) {
 // generate markup that calls them. Scanning app.js alone made each newly
 // extracted screen look like a page full of dead buttons, so both sweeps read
 // the whole tree.
-const CODE_DIRS = ['src/js/core', 'src/js/screens'];
+const CODE_DIRS = ['src/js/core', 'src/js/screens', 'src/js/components'];
 const codeSources = CODE_DIRS.flatMap(d => {
   const full = path.join(ROOT, d);
   return fs.existsSync(full)
