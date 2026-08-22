@@ -7,16 +7,16 @@
 //  imports as the remaining screens move out of app.js.
 // ==================================================================
 
-function screenErrorEl(name){
+export function screenErrorEl(name){
   return document.getElementById('screen-error-'+name);
 }
-function clearScreenError(name){
+export function clearScreenError(name){
   const el = screenErrorEl(name);
   if(el) el.remove();
 }
 // A banner is PREPENDED rather than replacing the screen: a renderer that
 // throws half way through still leaves useful content on the page.
-function showScreenError(name, err){
+export function showScreenError(name, err){
   console.error('[screen:'+name+']', err);
   const sc = document.getElementById('sc-'+name);
   if(!sc) return;
@@ -37,16 +37,3 @@ function showScreenError(name, err){
   sc.insertBefore(box, sc.firstChild);
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  screenErrorEl,
-  clearScreenError,
-  showScreenError,
-});

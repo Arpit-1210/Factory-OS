@@ -7,7 +7,17 @@
 //  imports as the remaining screens move out of app.js.
 // ==================================================================
 
-function togglePwd(){
+import { updateSidebarForRole } from '../components/sidebar.js';
+import { ROLE_HOME } from './config.js';
+import { checkDayRollover } from './day-rollover.js';
+import { todayStr } from './format.js';
+import { go } from './router.js';
+import { currentRole, fbEnabled, setRole } from './session.js';
+import { S } from './state.js';
+import { initFirebase, pullFromFirebase, pushToFirebase, startFirebaseSync } from './sync.js';
+import { renderDashboard } from '../screens/dashboard.js';
+
+export function togglePwd(){
   const i = document.getElementById('login-pwd');
   i.type = i.type==='password' ? 'text' : 'password';
 }
@@ -19,7 +29,7 @@ function togglePwd(){
 //
 // Role is now read from app_users and enforced by Postgres RLS. Editing
 // `currentRole` in DevTools no longer grants anything.
-async function doLogin(){
+export async function doLogin(){
   const email = ((document.getElementById('login-email')||{}).value||'').trim();
   const pwd   = document.getElementById('login-pwd').value;
   const errEl = document.getElementById('login-error');
@@ -63,11 +73,10 @@ async function doLogin(){
   }
 
   setRole(res.role);
-  window.currentRole = res.role;
   document.getElementById('login-pwd').value='';
   onLoginSuccess((res.user.user_metadata||{}).name || email.split('@')[0]);
 }
-function onLoginSuccess(displayName){
+export function onLoginSuccess(displayName){
   // Check if user selected a past date
   const loginDate = document.getElementById('login-work-date')?.value;
   if(loginDate && loginDate !== todayStr()){
@@ -126,10 +135,9 @@ function onLoginSuccess(displayName){
   renderDashboard();
   go(ROLE_HOME[currentRole]);
 }
-async function doLogout(){
+export async function doLogout(){
   if(fbEnabled) await FactoryDB.signOut();
   setRole(null);
-  window.currentRole=null;
   document.getElementById('app-shell').style.display='none';
   document.getElementById('login-page').style.display='flex';
   ['owner','supervisor','rm'].forEach(x=>{
@@ -142,17 +150,13 @@ async function doLogout(){
   document.getElementById('login-pwd').value='';
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  togglePwd,
-  doLogin,
-  onLoginSuccess,
-  doLogout,
-});
+// Enter-to-advance on the login form. These were inline
+// `if(event.key==='Enter') ...` expressions in the markup.
+export function emailKeydown(ev){
+  if (ev && ev.key === 'Enter') {
+    const pwd = document.getElementById('login-pwd');
+    if (pwd) pwd.focus();
+  }
+}
+export function passwordKeydown(ev){ if (ev && ev.key === 'Enter') doLogin(); }
+

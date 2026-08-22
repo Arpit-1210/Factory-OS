@@ -37,12 +37,17 @@ export function spBadge(s) {
   return `<span class="sp sp${i < 0 ? 0 : i}">${s}</span>`;
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, { fmt, fmtN, todayStr, spBadge });
+
+/**
+ * Build a data-args attribute for the delegated action layer.
+ *
+ * Values are JSON, and the attribute is delimited by double quotes, so both
+ * quote characters have to be entity-escaped. Product names in this catalogue
+ * genuinely contain apostrophes, and the old markup dealt with that by
+ * hand-escaping for a JS string literal; this does it once, correctly.
+ */
+export function argsAttr(...args) {
+  const json = JSON.stringify(args).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  return `data-args="${json}"`;
+}
+

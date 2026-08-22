@@ -12,12 +12,15 @@
 import { computeSalaryMonth, otAmt } from '../core/calc.js';
 import { fmt, fmtN, todayStr } from '../core/format.js';
 import { S } from '../core/state.js';
+import { sendGet } from '../core/sheets-sync.js';
+import { persist } from '../core/sync.js';
+import { checkXLSX, downloadXLSX } from '../core/xlsx.js';
 
 // ── screen state ──
 let salActiveLab = null;
 let salActiveMonth = null;
 
-function renderSalary(){
+export function renderSalary(){
   const monthEl = document.getElementById('sal-month');
   if(!monthEl) return;
   const month = monthEl.value || todayStr().slice(0,7);
@@ -47,7 +50,7 @@ function renderSalary(){
       <td class="num" style="color:var(--amber)">${adv?fmt(adv):'—'}</td>
       <td class="num lv">${ded?fmt(ded):'—'}</td>
       <td class="num pv" style="font-weight:700">${fmt(net)}</td>
-      <td><button class="btn btn-sm" onclick="openSalModal(${l.id})">✏️</button></td>
+      <td><button class="btn btn-sm" data-click="openSalModal" data-args="[${l.id}]">✏️</button></td>
     </tr>`).join('');
 
   document.getElementById('sal-tfoot').innerHTML=`
@@ -58,7 +61,7 @@ function renderSalary(){
     <td class="num pv" style="font-weight:800;font-size:14px">${fmt(totalNet)}</td>
     <td></td>`;
 }
-function openSalModal(labId){
+export function openSalModal(labId){
   salActiveLab = labId;
   const l = S.lab.find(x=>x.id===labId);
   if(!l) return;
@@ -70,8 +73,8 @@ function openSalModal(labId){
   document.getElementById('sal-note').value = adj.note||'';
   document.getElementById('sal-modal').style.display='flex';
 }
-function closeSalModal(){ document.getElementById('sal-modal').style.display='none'; }
-function saveSalAdj(){
+export function closeSalModal(){ document.getElementById('sal-modal').style.display='none'; }
+export function saveSalAdj(){
   const month = document.getElementById('sal-month').value||todayStr().slice(0,7);
   if(!S.salaryAdj) S.salaryAdj={};
   if(!S.salaryAdj[month]) S.salaryAdj[month]={};
@@ -84,7 +87,7 @@ function saveSalAdj(){
   closeSalModal();
   renderSalary();
 }
-function exportSalaryExcel(){
+export function exportSalaryExcel(){
   if(!checkXLSX()) return;
   const month = (document.getElementById('sal-month')||document.getElementById('export-sal-month'))?.value||todayStr().slice(0,7);
   // Same computation the Salary screen uses — the two cannot diverge.
@@ -112,23 +115,3 @@ function exportSalaryExcel(){
   }
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  renderSalary,
-  openSalModal,
-  closeSalModal,
-  saveSalAdj,
-  exportSalaryExcel,
-});
-
-// State the rest of the app reads. Re-published on each change by the
-// functions above; mirrored here so the initial value is visible too.
-window.salActiveLab = salActiveLab;
-window.salActiveMonth = salActiveMonth;

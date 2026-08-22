@@ -13,8 +13,9 @@ import { getFGBalance } from '../core/calc.js';
 import { FG_STAGES } from '../core/config.js';
 import { fmt, fmtN, todayStr } from '../core/format.js';
 import { S } from '../core/state.js';
+import { getAllFGProducts, initFGStock } from './fgstock.js';
 
-function renderInventory(){
+export function renderInventory(){
   initFGStock();
   if(!S.purchases) S.purchases=[];
 
@@ -195,14 +196,6 @@ function renderInventory(){
   document.getElementById('inv-alerts').innerHTML=alerts.join('');
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  renderInventory,
-});
+
+export function printPage(){ window.print(); }
+

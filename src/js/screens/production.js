@@ -13,12 +13,14 @@ import { calcOT, getFGBalance, sessionMembers, sessionProduction, sessionTeams }
 import { SPC, STAGES } from '../core/config.js';
 import { fmt, fmtN, spBadge, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
+import { openAssignModal } from '../components/assign-modal.js';
+import { persist } from '../core/sync.js';
 
 // ── screen state ──
 let activeSupId = null;
 let activeTeamId = null;
 
-function renderSupLogin(){
+export function renderSupLogin(){
   // Show pending/in-production orders as task list for supervisors
   const ob = document.getElementById('sup-orders-banner');
   if(ob){
@@ -41,7 +43,7 @@ function renderSupLogin(){
   const sups=S.lab.filter(l=>l.isSup&&l.present);
   const g=document.getElementById('sup-cards');
   if(!sups.length){g.innerHTML='<div class="wbox">No supervisors marked present. Go to Attendance first.</div>';document.getElementById('sup-sess-list').innerHTML='';return;}
-  g.innerHTML=sups.map(s=>{const h=!!S.sessions.find(ss=>ss.supId===s.id);return`<div class="sc ${h?'has-s':''}" onclick="enterSup(${s.id})"><div class="sc-ic">👷</div><div class="sc-nm">${s.name}</div><div class="sc-rl">${s.role} · ${fmt(s.wage)}/day</div><div class="sc-st" style="color:${h?'var(--jade)':'var(--fog)'}">${h?'✓ Session active':'Tap to start'}</div></div>`;}).join('');
+  g.innerHTML=sups.map(s=>{const h=!!S.sessions.find(ss=>ss.supId===s.id);return`<div class="sc ${h?'has-s':''}" data-click="enterSup" data-args="[${s.id}]"><div class="sc-ic">👷</div><div class="sc-nm">${s.name}</div><div class="sc-rl">${s.role} · ${fmt(s.wage)}/day</div><div class="sc-st" style="color:${h?'var(--jade)':'var(--fog)'}">${h?'✓ Session active':'Tap to start'}</div></div>`;}).join('');
   const sl=document.getElementById('sup-sess-list');
   if(!S.sessions.length){sl.innerHTML='<div style="color:#6B7280;font-size:12px">No active sessions yet.</div>';return;}
   sl.innerHTML=S.sessions.map(ss=>{
@@ -51,14 +53,14 @@ function renderSupLogin(){
     const lc      = members.reduce((a,m)=>a+(m.wage||0),0)+(ss.supWage||0);
     const gv      = prod.reduce((a,p)=>a+(p.value||0),0);
     const stages  = [...new Set(teams.map(t=>t.stage).filter(Boolean))];
-    return`<div class="tp"><div class="tph"><div><span class="tpn">${ss.supName}</span>&nbsp;${stages.map(spBadge).join(' ')}</div><div style="display:flex;gap:6px;align-items:center"><span style="font-family:var(--mono);font-size:10px;color:var(--dust)">${members.length} workers · ${fmt(lc)}/day</span><button class="btn btn-ember btn-xs" onclick="delSess(${ss.supId})">✕</button></div></div><div style="font-size:11px;color:var(--dust)">Team: ${members.map(m=>m.name).join(', ')||'—'}</div>${prod.length?`<div style="font-size:11px;color:var(--jade);margin-top:4px;font-family:var(--mono)">Produced: ${prod.map(p=>`${p.qty}× ${p.name}`).join(' | ')} = ${fmt(gv)}</div>`:'<div style="font-size:11px;color:var(--fog);margin-top:4px">No production logged yet</div>'}</div>`;}).join('');
+    return`<div class="tp"><div class="tph"><div><span class="tpn">${ss.supName}</span>&nbsp;${stages.map(spBadge).join(' ')}</div><div style="display:flex;gap:6px;align-items:center"><span style="font-family:var(--mono);font-size:10px;color:var(--dust)">${members.length} workers · ${fmt(lc)}/day</span><button class="btn btn-ember btn-xs" data-click="delSess" data-args="[${ss.supId}]">✕</button></div></div><div style="font-size:11px;color:var(--dust)">Team: ${members.map(m=>m.name).join(', ')||'—'}</div>${prod.length?`<div style="font-size:11px;color:var(--jade);margin-top:4px;font-family:var(--mono)">Produced: ${prod.map(p=>`${p.qty}× ${p.name}`).join(' | ')} = ${fmt(gv)}</div>`:'<div style="font-size:11px;color:var(--fog);margin-top:4px">No production logged yet</div>'}</div>`;}).join('');
 }
-function delSess(id){
+export function delSess(id){
   if(!confirm('Remove this supervisor session?')) return;
   S.sessions=S.sessions.filter(ss=>ss.supId!==id);
   persist();renderSupLogin();
 }
-function enterSup(supId){
+export function enterSup(supId){
   const sup=S.lab.find(l=>l.id===supId);activeSupId=supId;
   let sess=S.sessions.find(ss=>ss.supId===supId);
   if(!sess){
@@ -77,7 +79,7 @@ function enterSup(supId){
   activeTeamId=null;
   renderSupWork();
 }
-function renderSupWork(){
+export function renderSupWork(){
   const sess=S.sessions.find(ss=>ss.supId===activeSupId);
   if(!sess) return;
   if(!sess.teams) sess.teams=[];
@@ -93,7 +95,7 @@ function renderSupWork(){
   if(!team){ activeTeamId=null; renderSupWork(); return; }
   renderSupTeamWork(sess, team);
 }
-function renderSupTeamOverview(sess){
+export function renderSupTeamOverview(sess){
   const totalGoods=sess.teams.reduce((a,t)=>a+t.production.reduce((b,p)=>b+p.value,0),0);
   const totalMembers=sess.teams.reduce((a,t)=>a+t.team.length,0);
 
@@ -114,7 +116,7 @@ function renderSupTeamOverview(sess){
     html2+=sess.teams.map(t=>{
       const gv=t.production.reduce((a,p)=>a+p.value,0);
       const lc=t.team.reduce((a,m)=>a+m.wage,0);
-      return`<div class="card" style="border-left:3px solid #F59E0B;cursor:pointer" onclick="selectTeam(${t.teamId})">
+      return`<div class="card" style="border-left:3px solid #F59E0B;cursor:pointer" data-click="selectTeam" data-args="[${t.teamId}]">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
           <div>
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
@@ -129,20 +131,20 @@ function renderSupTeamOverview(sess){
           </div>
         </div>
         <div style="display:flex;gap:6px;margin-top:10px">
-          <button class="btn btn-amber btn-sm" onclick="event.stopPropagation();selectTeam(${t.teamId})">✏️ Edit Team ${t.teamId}</button>
-          <button class="btn btn-ember btn-xs" onclick="event.stopPropagation();deleteTeam(${t.teamId})">✕</button>
+          <button class="btn btn-amber btn-sm" data-click="selectTeam" data-args="[${t.teamId}]">✏️ Edit Team ${t.teamId}</button>
+          <button class="btn btn-ember btn-xs" data-click="deleteTeam" data-args="[${t.teamId}]">✕</button>
         </div>
       </div>`;
     }).join('');
   }
 
-  html2+=`<div style="margin-top:12px"><button class="btn btn-amber" onclick="addNewTeam()">+ Add New Team</button></div>`;
+  html2+=`<div style="margin-top:12px"><button class="btn btn-amber" data-click="addNewTeam">+ Add New Team</button></div>`;
 
   document.getElementById('sw-overview').innerHTML=html2;
   document.getElementById('sw-overview').style.display='block';
   document.getElementById('sw-teamwork').style.display='none';
 }
-function addNewTeam(){
+export function addNewTeam(){
   const sess=S.sessions.find(ss=>ss.supId===activeSupId);
   if(!sess) return;
   const newId=(sess.teams.length>0?Math.max(...sess.teams.map(t=>t.teamId)):0)+1;
@@ -151,11 +153,11 @@ function addNewTeam(){
   activeTeamId=newId;
   renderSupWork();
 }
-function selectTeam(teamId){
+export function selectTeam(teamId){
   activeTeamId=teamId;
   renderSupWork();
 }
-function deleteTeam(teamId){
+export function deleteTeam(teamId){
   if(!confirm('Delete Team '+teamId+'? All production logged by this team will be lost.')) return;
   const sess=S.sessions.find(ss=>ss.supId===activeSupId);
   if(sess) sess.teams=sess.teams.filter(t=>t.teamId!==teamId);
@@ -163,12 +165,12 @@ function deleteTeam(teamId){
   activeTeamId=null;
   renderSupWork();
 }
-function renderSupTeamWork(sess, team){
+export function renderSupTeamWork(sess, team){
   document.getElementById('sw-overview').style.display='none';
   document.getElementById('sw-teamwork').style.display='block';
   // Show stage tabs
   document.getElementById('sw-stages').innerHTML=STAGES.map(s=>
-    `<div class="tab ${team.stage===s?'active':''}" onclick="swStage('${s}')">${s}</div>`).join('');
+    `<div class="tab ${team.stage===s?'active':''}" data-click="swStage" data-args="[&quot;${s}&quot;]">${s}</div>`).join('');
   // Show colour field only for Painting stage
   const cfld=document.getElementById('sw-color-field');
   if(cfld){
@@ -187,18 +189,18 @@ function renderSupTeamWork(sess, team){
 
   document.getElementById('sw-team').innerHTML=`
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-      <button class="btn btn-sm" onclick="activeTeamId=null;renderSupWork()">← All Teams</button>
+      <button class="btn btn-sm" data-click="clearTeamSelection">← All Teams</button>
       <span style="font-family:var(--display);font-size:14px;font-weight:700;color:#111827">Team ${team.teamId}</span>
       <span class="sp ${SPC[STAGES.indexOf(team.stage)]}">${team.stage}</span>
     </div>
     ${team.team.length?`<div style="display:flex;flex-wrap:wrap;gap:6px">${team.team.map(m=>`
-      <div class="wc inteam" onclick="swTogTeam(${m.id})" style="cursor:pointer">
+      <div class="wc inteam" data-click="swTogTeam" data-args="[${m.id}]" style="cursor:pointer">
         <div><div class="wn">${m.name}</div><div class="ws">${fmt(m.wage)}/day${m.doingOT?' ⏰':''}</div></div>
         <div style="color:#EF4444;font-size:13px">−</div>
       </div>`).join('')}</div>`:'<div style="font-size:12px;color:#9CA3AF">Tap workers below to add to Team '+team.teamId+'.</div>'}`;
 
   document.getElementById('sw-pool').innerHTML=pool.length
-    ?pool.map(l=>`<div class="wc ${myTeam.has(l.id)?'inteam':'present'}" onclick="swTogTeam(${l.id})">
+    ?pool.map(l=>`<div class="wc ${myTeam.has(l.id)?'inteam':'present'}" data-click="swTogTeam" data-args="[${l.id}]">
       <div><div class="wn">${l.name}</div><div class="ws">${l.role} · ${fmt(l.wage)}${l.doingOT?' ⏰':''}</div></div>
       <div style="font-size:13px">${myTeam.has(l.id)?'−':'+'}</div>
     </div>`).join('')
@@ -240,7 +242,7 @@ function renderSupTeamWork(sess, team){
   const lc2=team.team.reduce((a,m)=>a+m.wage,0)+team.team.reduce((a,m)=>a+calcOT(m),0);
   pt.innerHTML=`<table class="tbl"><thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Wt/pc</th><th class="num">Total Wt</th><th class="num">₹/kg</th><th class="num">₹/unit</th><th class="num">Total</th><th></th></tr></thead>
   <tbody>${team.production.map((p,i)=>{const wt=p.weightPerPc||0;const tw=p.totalWeight||0;const rpkg=wt>0?Math.round(p.unitVal/wt):0;
-    return`<tr><td style="font-weight:500;color:#111827">${p.name}</td><td class="num">${p.qty}</td><td class="num">${wt||'—'}</td><td class="num">${tw?fmtN(tw)+' kg':'—'}</td><td class="num" style="color:#B45309">${rpkg?fmt(rpkg):'—'}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(p.value)}</td><td><button class="btn btn-ember btn-xs" onclick="delProd(${i})">✕</button></td></tr>`;}).join('')}
+    return`<tr><td style="font-weight:500;color:#111827">${p.name}</td><td class="num">${p.qty}</td><td class="num">${wt||'—'}</td><td class="num">${tw?fmtN(tw)+' kg':'—'}</td><td class="num" style="color:#B45309">${rpkg?fmt(rpkg):'—'}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(p.value)}</td><td><button class="btn btn-ember btn-xs" data-click="delProd" data-args="[${i}]">✕</button></td></tr>`;}).join('')}
   </tbody></table>
   <div style="display:flex;justify-content:flex-end;gap:16px;font-family:var(--mono);font-size:11px;margin-top:9px;padding-top:9px;border-top:1px solid #F3F4F6">
     <span>Goods: <span style="color:#065F46">${fmt(tv)}</span></span>
@@ -248,7 +250,7 @@ function renderSupTeamWork(sess, team){
     <span>Net: <span style="color:${tv-lc2>=0?'#065F46':'#B91C1C'}">${fmt(tv-lc2)}</span></span>
   </div>`;
 }
-function swStage(s){
+export function swStage(s){
   const sess=S.sessions.find(ss=>ss.supId===activeSupId);
   if(sess&&activeTeamId!==null){
     const team=sess.teams.find(t=>t.teamId===activeTeamId);
@@ -256,7 +258,7 @@ function swStage(s){
   }
   renderSupWork();
 }
-function swTogTeam(id){
+export function swTogTeam(id){
   const sess=S.sessions.find(ss=>ss.supId===activeSupId);
   if(!sess||activeTeamId===null) return;
   const team=sess.teams.find(t=>t.teamId===activeTeamId);
@@ -266,8 +268,8 @@ function swTogTeam(id){
   else team.team.push(S.lab.find(l=>l.id===id));
   persist();renderSupWork();
 }
-function swFill(){const sel=document.getElementById('sw-prod');const opt=sel.options[sel.selectedIndex];const p=opt?.dataset?.price||'';document.getElementById('sw-price').value=p;document.getElementById('sw-ph').textContent=p?`Catalogue: ${fmt(parseFloat(p))}/unit`:''}
-function logProd(){
+export function swFill(){const sel=document.getElementById('sw-prod');const opt=sel.options[sel.selectedIndex];const p=opt?.dataset?.price||'';document.getElementById('sw-price').value=p;document.getElementById('sw-ph').textContent=p?`Catalogue: ${fmt(parseFloat(p))}/unit`:''}
+export function logProd(){
   let sess=S.sessions.find(ss=>ss.supId===activeSupId);
   // Self-heal: if a background sync wiped the session while this screen was open, rebuild it
   if(!sess && activeSupId){
@@ -356,26 +358,26 @@ function logProd(){
   persist();
   renderSupWork();
 }
-function delProd(i){
+export function delProd(i){
   const sess=S.sessions.find(ss=>ss.supId===activeSupId);
   if(!sess||activeTeamId===null) return;
   const team=sess.teams.find(t=>t.teamId===activeTeamId);
   if(team){team.production.splice(i,1);persist();renderSupWork();}
 }
-function saveSup(){
+export function saveSup(){
   activeTeamId=null;
   persist();
   alert('All teams saved ✓');
   exitSup();
 }
-function exitSup(){
+export function exitSup(){
   activeSupId=null;
   activeTeamId=null;
   document.getElementById('sup-login').style.display='block';
   document.getElementById('sup-work').style.display='none';
   renderSupLogin();
 }
-function updateColorFieldVisibility(){
+export function updateColorFieldVisibility(){
   const sess = S.sessions.find(ss=>ss.supId===activeSupId);
   if(!sess) return;
   const team = sess.teams ? sess.teams.find(t=>t.teamId===activeTeamId) : null;
@@ -404,7 +406,7 @@ var _prodSeen = null;
 // Identity of the production data as far as the user can see it. Sessions and
 // teams are sorted because the rows come back from Postgres in no guaranteed
 // order, and an order change alone must not look like new data.
-function prodFingerprint(){
+export function prodFingerprint(){
   try{
     return JSON.stringify(
       (S.sessions||[]).slice()
@@ -424,13 +426,15 @@ function prodFingerprint(){
 // Call wherever the user has just been shown the current production state.
 // persist() covers every local edit, and go() covers every navigation, so a
 // badge can only survive when the change genuinely came from another device.
-function markProdSeen(){
+export function markProdSeen(){
   _prodSeen = prodFingerprint();
-  window._prodSeen = _prodSeen;   // single writer, so the mirror stays true
   var b = document.getElementById('prod-refresh');
   if(b) b.style.display = 'none';
 }
-function showProdRefresh(){
+/** The fingerprint the screen last drew. Read by tests and diagnostics. */
+export function lastSeenFingerprint(){ return _prodSeen; }
+
+export function showProdRefresh(){
   var b = document.getElementById('prod-refresh');
   if(!b){
     b = document.createElement('div');
@@ -450,43 +454,21 @@ function showProdRefresh(){
 }
 // Repaint the production screen WITHOUT kicking the user back to the
 // supervisor picker, unless the session they were in has gone away remotely.
-function applyProdRefresh(){
+export function applyProdRefresh(){
   var sess = activeSupId !== null &&
              (S.sessions||[]).find(function(ss){ return ss.supId === activeSupId; });
   if(sess) renderSupWork(); else exitSup();
   markProdSeen();
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  prodFingerprint, markProdSeen, showProdRefresh, applyProdRefresh,
-  renderSupLogin,
-  delSess,
-  enterSup,
-  renderSupWork,
-  renderSupTeamOverview,
-  addNewTeam,
-  selectTeam,
-  deleteTeam,
-  renderSupTeamWork,
-  swStage,
-  swTogTeam,
-  swFill,
-  logProd,
-  delProd,
-  saveSup,
-  exitSup,
-  updateColorFieldVisibility,
-});
 
-// State the rest of the app reads. Re-published on each change by the
-// functions above; mirrored here so the initial value is visible too.
-window.activeSupId = activeSupId;
-window.activeTeamId = activeTeamId;
+// The "← All Teams" button used to be inline markup that assigned
+// `activeTeamId=null` directly. Under module scope that wrote the stale
+// window mirror, never the module variable, so the button was dead: the
+// team view simply re-rendered itself. Only a function in this scope can
+// clear it.
+export function clearTeamSelection(){
+  activeTeamId = null;
+  renderSupWork();
+}
+

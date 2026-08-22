@@ -13,14 +13,16 @@ import { calcOT, getFGBalance } from '../core/calc.js';
 import { FG_STAGES } from '../core/config.js';
 import { todayStr } from '../core/format.js';
 import { S } from '../core/state.js';
+import { checkXLSX, downloadXLSX } from '../core/xlsx.js';
+import { getAllFGProducts } from './fgstock.js';
 
 // ════ EXCEL EXPORTS ════
-function renderExportPage(){
+export function renderExportPage(){
   const m=document.getElementById('export-sal-month');
   if(m) m.value=todayStr().slice(0,7);
   setExpRange('month');
 }
-function setExpRange(preset){
+export function setExpRange(preset){
   const from=document.getElementById('exp-from');
   const to=document.getElementById('exp-to');
   if(!from||!to) return;
@@ -30,13 +32,13 @@ function setExpRange(preset){
   else if(preset==='month'){from.value=today.slice(0,7)+'-01';to.value=today;}
   else if(preset==='all'){from.value='2020-01-01';to.value=today;}
 }
-function getExpDates(){
+export function getExpDates(){
   const from=document.getElementById('exp-from')?.value||'2020-01-01';
   const to=document.getElementById('exp-to')?.value||todayStr();
   return{from,to};
 }
-function inRange(date,from,to){ return date>=from&&date<=to; }
-function exportAttendance(){
+export function inRange(date,from,to){ return date>=from&&date<=to; }
+export function exportAttendance(){
   if(!checkXLSX()) return;
   const{from,to}=getExpDates();
   const rows=[['Date','Worker','Role','Daily Wage','OT Hours','OT Amount','Status','Wage Earned']];
@@ -57,7 +59,7 @@ function exportAttendance(){
   XLSX.utils.book_append_sheet(wb,ws,'Attendance');
   downloadXLSX(wb,`Attendance_${from}_to_${to}.xlsx`);
 }
-function exportProduction(){
+export function exportProduction(){
   if(!checkXLSX()) return;
   const{from,to}=getExpDates();
   const rows=[['Date','Supervisor','Stage','Product','Qty','Unit Value','Total Value']];
@@ -73,7 +75,7 @@ function exportProduction(){
   XLSX.utils.book_append_sheet(wb,ws,'Production');
   downloadXLSX(wb,`Production_${from}_to_${to}.xlsx`);
 }
-function exportOrders(){
+export function exportOrders(){
   if(!checkXLSX()) return;
   const{from,to}=getExpDates();
   const rows=[['Order ID','Date','Customer','Phone','City','Required By','Priority','Items','Amount','Advance','Balance','Status']];
@@ -84,7 +86,7 @@ function exportOrders(){
   XLSX.utils.book_append_sheet(wb,ws,'Orders');
   downloadXLSX(wb,`Orders_${from}_to_${to}.xlsx`);
 }
-function exportPnL(){
+export function exportPnL(){
   if(!checkXLSX()) return;
   const{from,to}=getExpDates();
   const rows=[['Date','Goods Value','Labour Cost','RM Cost','Net Profit','Margin %']];
@@ -99,7 +101,7 @@ function exportPnL(){
 
 // Current position rather than a date range: stock is a snapshot, so the
 // export range pickers do not apply to it.
-function exportInventory(){
+export function exportInventory(){
   if(!checkXLSX()) return;
   const wb=XLSX.utils.book_new();
 
@@ -123,22 +125,3 @@ function exportInventory(){
   downloadXLSX(wb,`Inventory_${todayStr()}.xlsx`);
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  exportInventory,
-  renderExportPage,
-  setExpRange,
-  getExpDates,
-  inRange,
-  exportAttendance,
-  exportProduction,
-  exportOrders,
-  exportPnL,
-});

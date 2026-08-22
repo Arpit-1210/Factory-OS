@@ -11,8 +11,9 @@
 
 import { todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
+import { persist } from '../core/sync.js';
 
-function renderStock(){
+export function renderStock(){
   if(!S.purchases) S.purchases=[];
   // Sync stock items with RM catalogue
   S.rm.forEach(r=>{
@@ -130,7 +131,7 @@ function renderStock(){
   </tbody></table>
   ${allMovements.length>50?`<div style="text-align:center;color:#9CA3AF;font-size:12px;padding:10px">Showing last 50 entries of ${allMovements.length} total</div>`:''}`;
 }
-function openStockUpdate(){
+export function openStockUpdate(){
   const sel=document.getElementById('stk-mat');
   if(sel) sel.innerHTML=S.rm.map(r=>`<option value="${r.id}">${r.name} (${r.unit})</option>`).join('');
   document.getElementById('stock-form').style.display='block';
@@ -145,8 +146,8 @@ function openStockUpdate(){
     if(s){document.getElementById('stk-qty').value=s.opening||0;document.getElementById('stk-reorder').value=s.reorder||100;}
   };
 }
-function closeStockForm(){ document.getElementById('stock-form').style.display='none'; }
-function saveStock(){
+export function closeStockForm(){ document.getElementById('stock-form').style.display='none'; }
+export function saveStock(){
   const id=parseInt(document.getElementById('stk-mat').value);
   const qty=parseFloat(document.getElementById('stk-qty').value)||0;
   const reorder=parseFloat(document.getElementById('stk-reorder').value)||0;
@@ -158,15 +159,15 @@ function saveStock(){
   persist();closeStockForm();renderStock();
   alert(`✓ Opening stock set: ${rm.name} = ${qty} ${rm.unit}`);
 }
-function openPurchase(){
+export function openPurchase(){
   if(!S.purchases) S.purchases=[];
   const sel=document.getElementById('pur-mat');
   if(sel) sel.innerHTML=S.rm.map(r=>`<option value="${r.id}" data-unit="${r.unit}">${r.name} (${r.unit})</option>`).join('');
   document.getElementById('purchase-form').style.display='block';
   document.getElementById('purchase-form').scrollIntoView({behavior:'smooth'});
 }
-function closePurchase(){ document.getElementById('purchase-form').style.display='none'; }
-function savePurchase(){
+export function closePurchase(){ document.getElementById('purchase-form').style.display='none'; }
+export function savePurchase(){
   if(!S.purchases) S.purchases=[];
   const sel=document.getElementById('pur-mat');
   const opt=sel.options[sel.selectedIndex];
@@ -188,20 +189,3 @@ function savePurchase(){
   alert(`✓ ${qty} ${rm.unit} of ${rm.name} added to stock.`);
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  renderStock,
-  openStockUpdate,
-  closeStockForm,
-  saveStock,
-  openPurchase,
-  closePurchase,
-  savePurchase,
-});

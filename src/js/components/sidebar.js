@@ -13,7 +13,7 @@ import { currentRole } from '../core/session.js';
 // ── screen state ──
 let _sidebarOpenTime = 0;
 
-function updateSidebarForRole(){
+export function updateSidebarForRole(){
   if(!currentRole) return;
   const allowed=ROLE_ACCESS[currentRole]||[];
   // Show/hide section cards based on role
@@ -41,40 +41,21 @@ function updateSidebarForRole(){
   }
 }
 // ════ SIDEBAR ════
-function toggleSection(id){
+export function toggleSection(id){
   const el=document.getElementById(id);
   el.classList.toggle('open');
 }
-function openSection(id){
+export function openSection(id){
   document.getElementById(id).classList.add('open');
 }
-function openSidebar(){
+export function openSidebar(){
   _sidebarOpenTime = Date.now();
   document.getElementById('sidebar').classList.add('open');
   document.getElementById('sb-overlay').style.display='block';
 }
-function closeSidebar(){
+export function closeSidebar(){
   if(Date.now()-_sidebarOpenTime < 400) return;
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('sb-overlay').style.display='none';
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  updateSidebarForRole,
-  toggleSection,
-  openSection,
-  openSidebar,
-  closeSidebar,
-});
-
-// State the rest of the app reads. Re-published on each change by the
-// functions above; mirrored here so the initial value is visible too.
-window._sidebarOpenTime = _sidebarOpenTime;

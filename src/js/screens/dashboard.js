@@ -14,18 +14,19 @@ import { STAGES } from '../core/config.js';
 import { fmt, todayStr } from '../core/format.js';
 import { currentRole } from '../core/session.js';
 import { S } from '../core/state.js';
+import { getAllFGProducts } from './fgstock.js';
 
 // ── screen state ──
 let activeDashTab = 'overview';
 
-function switchDashTab(tab){
+export function switchDashTab(tab){
   activeDashTab = tab;
   ['overview','factory','money'].forEach(t=>{
     document.getElementById('dash-tab-'+t).style.display = t===tab?'block':'none';
     document.getElementById('dashtab-'+t).classList.toggle('active', t===tab);
   });
 }
-function renderDashboard(){
+export function renderDashboard(){
   if(!S||!S.lab) return;
 
   // Hide money tab for non-owners
@@ -62,46 +63,46 @@ function renderDashboard(){
 
   // ── ALERTS (always visible) ──
   let alerts='';
-  if(overdueOrds.length) alerts+=`<div class="alert-banner danger">🚨 ${overdueOrds.length} order${overdueOrds.length>1?'s':''} overdue<span class="ab-action" onclick="go('orders')">View →</span></div>`;
-  if(rmLow>0) alerts+=`<div class="alert-banner warn">📦 ${rmLow} RM material${rmLow>1?'s':''} low on stock<span class="ab-action" onclick="go('stock')">Reorder →</span></div>`;
-  if(inProd.length) alerts+=`<div class="alert-banner ok">🏗️ ${inProd.length} order${inProd.length>1?'s':''} in production<span class="ab-action" onclick="go('orders')">View →</span></div>`;
+  if(overdueOrds.length) alerts+=`<div class="alert-banner danger">🚨 ${overdueOrds.length} order${overdueOrds.length>1?'s':''} overdue<span class="ab-action" data-click="go" data-args="[&quot;orders&quot;]">View →</span></div>`;
+  if(rmLow>0) alerts+=`<div class="alert-banner warn">📦 ${rmLow} RM material${rmLow>1?'s':''} low on stock<span class="ab-action" data-click="go" data-args="[&quot;stock&quot;]">Reorder →</span></div>`;
+  if(inProd.length) alerts+=`<div class="alert-banner ok">🏗️ ${inProd.length} order${inProd.length>1?'s':''} in production<span class="ab-action" data-click="go" data-args="[&quot;orders&quot;]">View →</span></div>`;
   document.getElementById('dash-alerts').innerHTML=alerts?`<div class="alert-row">${alerts}</div>`:'';
 
   // ── TAB 1: OVERVIEW ──
   const overviewCards = currentRole==='owner' ? `
-    <div class="dash-card c-jade" onclick="go('day')">
+    <div class="dash-card c-jade" data-click="go" data-args="[&quot;day&quot;]">
       <span class="dc-icon">🏭</span><div class="dc-label">Goods Value Today</div>
       <div class="dc-value green" style="font-size:20px">${fmt(totalGoods)}</div><div class="dc-sub">${totalUnits} units made</div>
     </div>
-    <div class="dash-card c-amber" onclick="go('payments')">
+    <div class="dash-card c-amber" data-click="go" data-args="[&quot;payments&quot;]">
       <span class="dc-icon">💸</span><div class="dc-label">Balance Due</div>
       <div class="dc-value amber" style="font-size:20px">${fmt(balanceDue)}</div><div class="dc-sub">${activeOrders} active orders</div>
     </div>
-    <div class="dash-card c-blue" onclick="go('att')">
+    <div class="dash-card c-blue" data-click="go" data-args="[&quot;att&quot;]">
       <span class="dc-icon">👷</span><div class="dc-label">Workers Present</div>
       <div class="dc-value">${present.length}</div><div class="dc-sub">of ${S.lab.length} total</div>
     </div>
-    <div class="dash-card c-purple" onclick="go('fgstock')">
+    <div class="dash-card c-purple" data-click="go" data-args="[&quot;fgstock&quot;]">
       <span class="dc-icon">📦</span><div class="dc-label">Ready to Dispatch</div>
       <div class="dc-value ${packingItems>0?'green':''}">${packingItems}</div><div class="dc-sub">in packing stage</div>
     </div>
-    <div class="dash-card c-blue" onclick="go('transfers')">
+    <div class="dash-card c-blue" data-click="go" data-args="[&quot;transfers&quot;]">
       <span class="dc-icon">🔄</span><div class="dc-label">Unit 2 Transfers</div>
       <div class="dc-value">${(S.unitTransfers||[]).filter(t=>t.date===todayStr()).length}</div><div class="dc-sub">today · ${(S.unitTransfers||[]).length} total</div>
     </div>` : `
-    <div class="dash-card c-blue" onclick="go('att')">
+    <div class="dash-card c-blue" data-click="go" data-args="[&quot;att&quot;]">
       <span class="dc-icon">👷</span><div class="dc-label">Workers Present</div>
       <div class="dc-value">${present.length}</div><div class="dc-sub">of ${S.lab.length} total</div>
     </div>
-    <div class="dash-card c-amber" onclick="go('sup')">
+    <div class="dash-card c-amber" data-click="go" data-args="[&quot;sup&quot;]">
       <span class="dc-icon">🏗️</span><div class="dc-label">Active Teams</div>
       <div class="dc-value">${activeTeams}</div><div class="dc-sub">${S.sessions.length} supervisor${S.sessions.length!==1?'s':''}</div>
     </div>
-    <div class="dash-card c-jade" onclick="go('day')">
+    <div class="dash-card c-jade" data-click="go" data-args="[&quot;day&quot;]">
       <span class="dc-icon">📦</span><div class="dc-label">Units Produced</div>
       <div class="dc-value">${totalUnits}</div><div class="dc-sub">today so far</div>
     </div>
-    <div class="dash-card c-purple" onclick="go('fgstock')">
+    <div class="dash-card c-purple" data-click="go" data-args="[&quot;fgstock&quot;]">
       <span class="dc-icon">✅</span><div class="dc-label">Ready to Dispatch</div>
       <div class="dc-value ${packingItems>0?'green':''}">${packingItems}</div><div class="dc-sub">in packing stage</div>
     </div>`;
@@ -109,27 +110,27 @@ function renderDashboard(){
 
   // ── TAB 2: FACTORY ──
   document.getElementById('dash-factory-cards').innerHTML=`
-    <div class="dash-card c-amber" onclick="go('sup')">
+    <div class="dash-card c-amber" data-click="go" data-args="[&quot;sup&quot;]">
       <span class="dc-icon">🏗️</span><div class="dc-label">Active Teams</div>
       <div class="dc-value">${activeTeams}</div><div class="dc-sub">${S.sessions.length} supervisor${S.sessions.length!==1?'s':''}</div>
     </div>
-    <div class="dash-card c-blue" onclick="go('att')">
+    <div class="dash-card c-blue" data-click="go" data-args="[&quot;att&quot;]">
       <span class="dc-icon">👷</span><div class="dc-label">Present Today</div>
       <div class="dc-value">${present.length}</div><div class="dc-sub">Labour: ${fmt(totalLab)}</div>
     </div>
-    <div class="dash-card c-jade" onclick="go('day')">
+    <div class="dash-card c-jade" data-click="go" data-args="[&quot;day&quot;]">
       <span class="dc-icon">📦</span><div class="dc-label">Units Produced</div>
       <div class="dc-value">${totalUnits}</div><div class="dc-sub">Value: ${fmt(totalGoods)}</div>
     </div>
-    <div class="dash-card c-ember" onclick="go('stock')">
+    <div class="dash-card c-ember" data-click="go" data-args="[&quot;stock&quot;]">
       <span class="dc-icon">🧪</span><div class="dc-label">RM Low Stock</div>
       <div class="dc-value ${rmLow>0?'red':''}">${rmLow}</div><div class="dc-sub">${rmLow>0?'needs reorder':'all OK'}</div>
     </div>
-    <div class="dash-card c-purple" onclick="go('fgstock')">
+    <div class="dash-card c-purple" data-click="go" data-args="[&quot;fgstock&quot;]">
       <span class="dc-icon">📦</span><div class="dc-label">In Packing</div>
       <div class="dc-value ${packingItems>0?'green':''}">${packingItems}</div><div class="dc-sub">ready to dispatch</div>
     </div>
-    <div class="dash-card c-amber" onclick="go('raw')">
+    <div class="dash-card c-amber" data-click="go" data-args="[&quot;raw&quot;]">
       <span class="dc-icon">🧪</span><div class="dc-label">RM Issued Today</div>
       <div class="dc-value">${S.rawLog.length}</div><div class="dc-sub">Cost: ${fmt(totalRM)}</div>
     </div>`;
@@ -162,32 +163,32 @@ function renderDashboard(){
   // ── TAB 3: MONEY (Owner only) ──
   if(currentRole==='owner'){
     document.getElementById('dash-money-cards').innerHTML=`
-      <div class="dash-card c-jade" onclick="go('day')">
+      <div class="dash-card c-jade" data-click="go" data-args="[&quot;day&quot;]">
         <span class="dc-icon">💰</span><div class="dc-label">Net Profit Today</div>
         <div class="dc-value ${net>=0?'green':'red'}" style="font-size:20px">${fmt(net)}</div>
         <div class="dc-sub">${totalGoods>0?Math.round(net/totalGoods*100)+'% margin':'no production'}</div>
       </div>
-      <div class="dash-card c-blue" onclick="go('month')">
+      <div class="dash-card c-blue" data-click="go" data-args="[&quot;month&quot;]">
         <span class="dc-icon">📅</span><div class="dc-label">Month Profit</div>
         <div class="dc-value ${monthProfit>=0?'green':'red'}" style="font-size:20px">${fmt(monthProfit)}</div>
         <div class="dc-sub">${monthEntries.length} days this month</div>
       </div>
-      <div class="dash-card c-jade" onclick="go('day')">
+      <div class="dash-card c-jade" data-click="go" data-args="[&quot;day&quot;]">
         <span class="dc-icon">🏭</span><div class="dc-label">Goods Value Today</div>
         <div class="dc-value green" style="font-size:20px">${fmt(totalGoods)}</div>
         <div class="dc-sub">${totalUnits} units</div>
       </div>
-      <div class="dash-card c-ember" onclick="go('day')">
+      <div class="dash-card c-ember" data-click="go" data-args="[&quot;day&quot;]">
         <span class="dc-icon">💸</span><div class="dc-label">Total Cost Today</div>
         <div class="dc-value red" style="font-size:20px">${fmt(totalLab+totalRM)}</div>
         <div class="dc-sub">Labour + RM</div>
       </div>
-      <div class="dash-card c-amber" onclick="go('payments')">
+      <div class="dash-card c-amber" data-click="go" data-args="[&quot;payments&quot;]">
         <span class="dc-icon">💳</span><div class="dc-label">Balance Due</div>
         <div class="dc-value amber" style="font-size:20px">${fmt(balanceDue)}</div>
         <div class="dc-sub">${activeOrders} active orders</div>
       </div>
-      <div class="dash-card c-blue" onclick="go('att')">
+      <div class="dash-card c-blue" data-click="go" data-args="[&quot;att&quot;]">
         <span class="dc-icon">👷</span><div class="dc-label">Labour Cost</div>
         <div class="dc-value" style="font-size:20px">${fmt(totalLab)}</div>
         <div class="dc-sub">${present.length} workers present</div>
@@ -232,7 +233,7 @@ function renderDashboard(){
 
   renderTaskBoard();
 }
-function renderTaskBoard(){
+export function renderTaskBoard(){
   const el = document.getElementById('dash-task-list');
   if(!el) return;
 
@@ -305,28 +306,11 @@ function renderTaskBoard(){
         </div>`;
       }).join('')}</div>`:`<div style="font-size:12px;color:var(--text4)">${o.items||'No items'}</div>`}
       <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-        ${o.status==='pending'?`<button class="btn btn-sm" style="background:var(--blue-l);color:var(--blue);border-color:var(--blue-b)" onclick="updateOrderStatus('${o.id}','production')">→ Start Production</button>`:''}
-        ${o.status==='production'?`<button class="btn btn-sm" style="background:var(--jade-l);color:var(--jade);border-color:var(--jade-b)" onclick="updateOrderStatus('${o.id}','ready')">→ Mark Ready</button>`:''}
-        ${o.status==='ready'?`<button class="btn btn-sm" style="background:var(--surface2);color:var(--text2);border-color:var(--border)" onclick="updateOrderStatus('${o.id}','dispatched')">🚚 Dispatch</button>`:''}
+        ${o.status==='pending'?`<button class="btn btn-sm" style="background:var(--blue-l);color:var(--blue);border-color:var(--blue-b)" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;production&quot;]">→ Start Production</button>`:''}
+        ${o.status==='production'?`<button class="btn btn-sm" style="background:var(--jade-l);color:var(--jade);border-color:var(--jade-b)" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;ready&quot;]">→ Mark Ready</button>`:''}
+        ${o.status==='ready'?`<button class="btn btn-sm" style="background:var(--surface2);color:var(--text2);border-color:var(--border)" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;dispatched&quot;]">🚚 Dispatch</button>`:''}
       </div>
     </div>`;
   }).join('');
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  switchDashTab,
-  renderDashboard,
-  renderTaskBoard,
-});
-
-// State the rest of the app reads. Re-published on each change by the
-// functions above; mirrored here so the initial value is visible too.
-window.activeDashTab = activeDashTab;

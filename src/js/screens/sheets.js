@@ -13,8 +13,10 @@ import { APPS_SCRIPT_CODE } from '../core/config.js';
 import { todayStr } from '../core/format.js';
 import { fbEnabled } from '../core/session.js';
 import { S } from '../core/state.js';
+import { sendGet, setSyncStatus, updateSyncStatus } from '../core/sheets-sync.js';
+import { persist, pushToFirebase, runDailyBackup } from '../core/sync.js';
 
-function renderSheets(){
+export function renderSheets(){
   const urlEl=document.getElementById('sheets-url');
   if(urlEl) urlEl.value=S.sheetsUrl||'';
   const codeEl=document.getElementById('apps-script-code');
@@ -26,8 +28,8 @@ function renderSheets(){
     else{badge.textContent='Not connected';badge.style.background='var(--surface2)';badge.style.color='var(--text4)';}
   }
 }
-function saveUrl(){S.sheetsUrl=document.getElementById('sheets-url').value.trim();persist();updateSyncStatus();}
-function testConnection(){
+export function saveUrl(){S.sheetsUrl=document.getElementById('sheets-url').value.trim();persist();updateSyncStatus();}
+export function testConnection(){
   const url=S.sheetsUrl;
   if(!url){document.getElementById('conn-result').innerHTML=`<div class="wbox">Paste Web App URL first.</div>`;return;}
   if(!url.includes('script.google.com/macros/s/')){document.getElementById('conn-result').innerHTML=`<div class="wbox">⚠ Wrong URL — must contain script.google.com/macros/s/</div>`;return;}
@@ -39,23 +41,15 @@ function testConnection(){
   setSyncStatus('ok','Connected ✓');
   document.getElementById('conn-result').innerHTML=`<div class="gbox"><b>✓ Test sent!</b><br><br>Check your Google Sheet — look for a row with date <b>TEST-${todayStr()}</b> in the Daily Ledger tab.<br>If it appears → <b>fully connected!</b></div>`;
 }
-function copyScript(){
+export function copyScript(){
   const ta=document.getElementById('apps-script-code');ta.select();document.execCommand('copy');
   const c=document.getElementById('copy-confirm');c.style.display='inline';
   setTimeout(()=>c.style.display='none',2000);
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  renderSheets,
-  saveUrl,
-  testConnection,
-  copyScript,
-});
+
+// Small wrappers so the markup carries no expressions of its own.
+export function selectAllIn(ev){ if (ev && ev.target && ev.target.select) ev.target.select(); }
+export async function backupNow(){ await runDailyBackup(); alert('✓ Backup saved'); }
+export async function forceSync(){ await pushToFirebase(); alert('✓ Synced'); }
+

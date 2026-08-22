@@ -13,7 +13,7 @@ import { MNAMES, STAGES } from '../core/config.js';
 import { fmt, fmtN, spBadge } from '../core/format.js';
 import { S } from '../core/state.js';
 
-function initMonthly(){
+export function initMonthly(){
   const now=new Date();
   const ms=document.getElementById('m-mon');
   const ys=document.getElementById('m-yr');
@@ -24,19 +24,19 @@ function initMonthly(){
   }
   renderMonthly();
 }
-function prevMonth(){
+export function prevMonth(){
   const ms=document.getElementById('m-mon');const ys=document.getElementById('m-yr');
   let m=parseInt(ms.value),y=parseInt(ys.value);
   m--;if(m<0){m=11;y--;}
   ms.value=m;ys.value=y;renderMonthly();
 }
-function nextMonth(){
+export function nextMonth(){
   const ms=document.getElementById('m-mon');const ys=document.getElementById('m-yr');
   let m=parseInt(ms.value),y=parseInt(ys.value);
   m++;if(m>11){m=0;y++;}
   ms.value=m;ys.value=y;renderMonthly();
 }
-function showMonthDay(dateStr){
+export function showMonthDay(dateStr){
   const e = S.ledger.find(x=>x.date===dateStr);
   const detail = document.getElementById('m-day-detail');
   if(!e){ detail.style.display='none'; return; }
@@ -76,14 +76,14 @@ function showMonthDay(dateStr){
   detail.style.display='block';
   detail.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
-function renderMonthly(){
+export function renderMonthly(){
   const month=parseInt(document.getElementById('m-mon').value);const year=parseInt(document.getElementById('m-yr').value);
   const entries=S.ledger.filter(e=>{const d=new Date(e.date+'T00:00:00');return d.getMonth()===month&&d.getFullYear()===year;});
   const tG=entries.reduce((a,e)=>a+e.goodsValue,0);const tL=entries.reduce((a,e)=>a+e.labourCost,0);const tOT=entries.reduce((a,e)=>a+(e.overtimeCost||0),0);const tR=entries.reduce((a,e)=>a+e.rmCost,0);const tN=entries.reduce((a,e)=>a+e.netProfit,0);const pd=entries.length;const best=pd?entries.reduce((a,e)=>e.netProfit>a?e.netProfit:a,-Infinity):0;const avg=pd?Math.round(tN/pd):0;
   document.getElementById('m-met').innerHTML=`<div class="met m-blue"><div class="ml">Production Days</div><div class="mv w">${pd}</div></div><div class="met m-green"><div class="ml">Total Goods</div><div class="mv g">${fmt(tG)}</div></div><div class="met m-red"><div class="ml">Total Labour</div><div class="mv r">${fmt(tL)}</div></div><div class="met m-amber"><div class="ml">Total OT</div><div class="mv a">${fmt(tOT)}</div></div><div class="met m-amber"><div class="ml">Total RM</div><div class="mv a">${fmt(tR)}</div></div><div class="met ${tN>=0?'m-green':'m-red'}"><div class="ml">Monthly Profit</div><div class="mv ${tN>=0?'g':'r'}">${fmt(tN)}</div></div><div class="met ${avg>=0?'m-green':'m-red'}"><div class="ml">Avg Daily</div><div class="mv ${avg>=0?'g':'r'}">${fmt(avg)}</div></div><div class="met m-green"><div class="ml">Best Day</div><div class="mv g">${pd?fmt(best):'—'}</div></div>`;
   const fd=new Date(year,month,1).getDay();const dim=new Date(year,month+1,0).getDate();const now=new Date();const emap={};entries.forEach(e=>emap[e.date]=e);
   let cal='';for(let i=0;i<fd;i++)cal+=`<div class="cc empty"></div>`;
-  for(let d=1;d<=dim;d++){const ds=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;const e=emap[ds];const isT=now.getDate()===d&&now.getMonth()===month&&now.getFullYear()===year;cal+=`<div class="cc ${e?(e.netProfit>=0?'pd':'ld'):''} ${isT?'td':''}" onclick="showMonthDay('${ds}')" style="cursor:${e?'pointer':'default'}">`+`<div class="ccn">${d}</div>${e?`<div class="ccv ${e.netProfit>=0?'g':'r'}">${e.netProfit>=0?'+':''}${Math.round(e.netProfit/1000)}k</div>`:''}</div>`;}
+  for(let d=1;d<=dim;d++){const ds=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;const e=emap[ds];const isT=now.getDate()===d&&now.getMonth()===month&&now.getFullYear()===year;cal+=`<div class="cc ${e?(e.netProfit>=0?'pd':'ld'):''} ${isT?'td':''}" data-click="showMonthDay" data-args="[&quot;${ds}&quot;]" style="cursor:${e?'pointer':'default'}">`+`<div class="ccn">${d}</div>${e?`<div class="ccv ${e.netProfit>=0?'g':'r'}">${e.netProfit>=0?'+':''}${Math.round(e.netProfit/1000)}k</div>`:''}</div>`;}
   document.getElementById('m-cal').innerHTML=cal;
   let lr='';
   if(!entries.length)lr=`<tr><td colspan="8" style="text-align:center;color:var(--fog);padding:24px">No data for this month yet.</td></tr>`;
@@ -109,18 +109,10 @@ function renderMonthly(){
   document.getElementById('m-sups').innerHTML=Object.values(supM).sort((a,b)=>b.goods-a.goods).map(s=>{const n=s.goods-s.lab;return`<tr><td style="font-weight:600">${s.name}</td><td>${[...s.stages].map(st=>spBadge(st)).join(' ')}</td><td class="num">${s.days}</td><td class="num">${fmtN(s.goods)}</td><td class="num">${fmtN(s.lab)}</td><td class="num ${n>=0?'pv':'lv'}">${fmt(n)}</td></tr>`;}).join('')||`<tr><td colspan="6" style="color:var(--text4);text-align:center">No supervisor data.</td></tr>`;
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  initMonthly,
-  prevMonth,
-  nextMonth,
-  showMonthDay,
-  renderMonthly,
-});
+
+// Was inline DOM poking in the markup.
+export function closeMonthDayDetail(){
+  const el = document.getElementById('m-day-detail');
+  if (el) el.style.display = 'none';
+}
+

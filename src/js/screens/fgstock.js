@@ -13,17 +13,18 @@ import { getFGBalance } from '../core/calc.js';
 import { FG_STAGES } from '../core/config.js';
 import { fmt, fmtN, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
+import { persist } from '../core/sync.js';
 
 // ── screen state ──
 let activeFGStage = 'all';
 
-function initFGStock(){
+export function initFGStock(){
   if(!S.fgStock) S.fgStock={};
   if(!S.fgTransfers) S.fgTransfers=[];
   if(!S.fgAdjustments) S.fgAdjustments=[];
   persist();
 }
-function switchFGStage(stage){
+export function switchFGStage(stage){
   activeFGStage=stage;
   document.querySelectorAll('#fg-stage-tabs .tab').forEach(t=>{
     const s=t.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
@@ -31,7 +32,7 @@ function switchFGStage(stage){
   });
   renderFGStock();
 }
-function renderFGStock(){
+export function renderFGStock(){
   initFGStock();
   // Collect all products that have any stock across any stage
   const allProducts=new Set();
@@ -78,8 +79,8 @@ function renderFGStock(){
           <td class="num">${fg?fmtN(fg.price):'—'}</td>
           <td class="num">${fmtN(val)}</td>
           <td style="display:flex;gap:5px;flex-wrap:wrap">
-            <button class="btn btn-sm" style="background:${bg};color:${color};border-color:${border};font-size:11px" onclick="quickTransfer('${stage}','${nextStage}','${p.name}',${p.qty})">→ ${nextStage}</button>
-            ${stage==='Packing'?`<button class="btn btn-sm btn-jade" onclick="openAssignModal('${p.name}',${p.qty},'fgstock')">📋 Assign to Order</button>`:''}
+            <button class="btn btn-sm" style="background:${bg};color:${color};border-color:${border};font-size:11px" data-click="quickTransfer" data-args="[&quot;${stage}&quot;,&quot;${nextStage}&quot;,&quot;${p.name}&quot;,${p.qty}]">→ ${nextStage}</button>
+            ${stage==='Packing'?`<button class="btn btn-sm btn-jade" data-click="openAssignModal" data-args="[&quot;${p.name}&quot;,${p.qty},&quot;fgstock&quot;]">📋 Assign to Order</button>`:''}
           </td>
         </tr>`;
       }).join('')}
@@ -110,7 +111,7 @@ function renderFGStock(){
     </tbody></table>`
   :'<div style="color:#9CA3AF;font-size:12px">No transfers recorded yet.</div>';
 }
-function quickTransfer(from, to, product, maxQty){
+export function quickTransfer(from, to, product, maxQty){
   const qty=parseInt(prompt(`Transfer "${product}" from ${from} to ${to}
 Available: ${maxQty} units
 Enter quantity to transfer:`));
@@ -120,7 +121,7 @@ Enter quantity to transfer:`));
   persist();renderFGStock();
   alert(`✓ ${qty} × ${product} moved from ${from} to ${to}`);
 }
-function openFGTransfer(){
+export function openFGTransfer(){
   initFGStock();
   const sel=document.getElementById('fgt-prod');
   sel.innerHTML=S.fg.map(f=>`<option value="${f.name}">${f.name}</option>`).join('');
@@ -128,14 +129,14 @@ function openFGTransfer(){
   document.getElementById('fg-transfer-form').style.display='block';
   document.getElementById('fg-transfer-form').scrollIntoView({behavior:'smooth'});
 }
-function closeFGTransfer(){document.getElementById('fg-transfer-form').style.display='none';}
-function updateFGTransferTo(){
+export function closeFGTransfer(){document.getElementById('fg-transfer-form').style.display='none';}
+export function updateFGTransferTo(){
   const from=document.getElementById('fgt-from').value;
   const toSel=document.getElementById('fgt-to');
   const idx=FG_STAGES.indexOf(from);
   toSel.innerHTML=FG_STAGES.slice(idx+1).map(s=>`<option value="${s}">${s}</option>`).join('')+'<option value="Dispatch">Dispatch (Sold)</option>';
 }
-function saveFGTransfer(){
+export function saveFGTransfer(){
   initFGStock();
   const from=document.getElementById('fgt-from').value;
   const to=document.getElementById('fgt-to').value;
@@ -150,14 +151,14 @@ function saveFGTransfer(){
   persist();closeFGTransfer();renderFGStock();
   alert(`✓ ${qty} × ${prod} transferred: ${from} → ${to}`);
 }
-function openFGAdjust(){
+export function openFGAdjust(){
   initFGStock();
   const sel=document.getElementById('fga-prod');
   sel.innerHTML=S.fg.map(f=>`<option value="${f.name}">${f.name}</option>`).join('');
   document.getElementById('fg-adjust-form').style.display='block';
 }
-function closeFGAdjust(){document.getElementById('fg-adjust-form').style.display='none';}
-function saveFGAdjust(){
+export function closeFGAdjust(){document.getElementById('fg-adjust-form').style.display='none';}
+export function saveFGAdjust(){
   initFGStock();
   const stage=document.getElementById('fga-stage').value;
   const prod=document.getElementById('fga-prod').value;
@@ -168,7 +169,7 @@ function saveFGAdjust(){
   persist();closeFGAdjust();renderFGStock();
   alert(`✓ Adjustment saved: ${prod} ${qty>0?'+':''}${qty} at ${stage}`);
 }
-function getAllFGProducts(){
+export function getAllFGProducts(){
   const all=new Set();
   S.fg.forEach(f=>all.add(f.name));
   S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>all.add(p.name))));
@@ -177,29 +178,3 @@ function getAllFGProducts(){
   return [...all].sort();
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  initFGStock,
-  switchFGStage,
-  renderFGStock,
-  quickTransfer,
-  openFGTransfer,
-  closeFGTransfer,
-  updateFGTransferTo,
-  saveFGTransfer,
-  openFGAdjust,
-  closeFGAdjust,
-  saveFGAdjust,
-  getAllFGProducts,
-});
-
-// State the rest of the app reads. Re-published on each change by the
-// functions above; mirrored here so the initial value is visible too.
-window.activeFGStage = activeFGStage;

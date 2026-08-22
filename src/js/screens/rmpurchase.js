@@ -11,8 +11,10 @@
 
 import { fmt, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
+import { persist } from '../core/sync.js';
+import { renderStock } from './stock.js';
 
-function openRMPurchaseForm(){
+export function openRMPurchaseForm(){
   if(!S.purchases) S.purchases=[];
   const sel=document.getElementById('rmp-mat');
   if(sel) sel.innerHTML=S.rm.map(r=>`<option value="${r.id}" data-unit="${r.unit}">${r.name} (${r.unit})</option>`).join('');
@@ -35,8 +37,8 @@ function openRMPurchaseForm(){
   document.getElementById('rmp-form').style.display='block';
   document.getElementById('rmp-form').scrollIntoView({behavior:'smooth'});
 }
-function closeRMPurchaseForm(){ document.getElementById('rmp-form').style.display='none'; }
-function saveRMPurchase(){
+export function closeRMPurchaseForm(){ document.getElementById('rmp-form').style.display='none'; }
+export function saveRMPurchase(){
   if(!S.purchases) S.purchases=[];
   const type=document.getElementById('rmp-type').value;
   const sel=document.getElementById('rmp-mat');
@@ -73,7 +75,7 @@ function saveRMPurchase(){
   renderStock();
   alert(`✓ ${type==='opening'?'Opening stock':'Entry'} saved: ${rm.name} ${sign>0?'+':''}${qty*sign} ${rm.unit}`);
 }
-function renderRMPurchase(){
+export function renderRMPurchase(){
   if(!S.purchases) S.purchases=[];
   // Populate filter
   const fil=document.getElementById('rmp-filter');
@@ -147,17 +149,3 @@ function renderRMPurchase(){
   :'<div style="color:#9CA3AF;font-size:12px">No entries yet. Click + Add Purchase / Opening Stock to start.</div>';
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  openRMPurchaseForm,
-  closeRMPurchaseForm,
-  saveRMPurchase,
-  renderRMPurchase,
-});

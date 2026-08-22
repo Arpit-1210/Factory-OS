@@ -12,12 +12,15 @@
 import { isOverdue } from '../core/calc.js';
 import { fmt, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
+import { sendGet } from '../core/sheets-sync.js';
+import { persist } from '../core/sync.js';
+import { renderPayments } from './payments.js';
 
 // ── screen state ──
 let orderItems = []; // [{name, qty, price}]
 let orderFilter = 'all';
 
-function renderOrders(){
+export function renderOrders(){
   const orders = orderFilter==='all' ? S.orders : S.orders.filter(o=>o.status===orderFilter);
 
   // Tab active state
@@ -71,17 +74,17 @@ function renderOrders(){
         </div>
       </div>
       <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-        ${o.status==='pending'?`<button class="btn btn-sm" onclick="updateOrderStatus('${o.id}','production')" style="background:#EFF6FF;color:#1E40AF;border-color:#BFDBFE">→ Start Production</button>`:''}
-        ${o.status==='production'?`<button class="btn btn-sm" onclick="updateOrderStatus('${o.id}','ready')" style="background:#ECFDF5;color:#065F46;border-color:#A7F3D0">→ Mark Ready</button>`:''}
-        ${o.status==='ready'?`<button class="btn btn-sm" onclick="updateOrderStatus('${o.id}','dispatched')" style="background:#F9FAFB;color:#374151;border-color:#E5E7EB">🚚 Dispatch</button>`:''}
-        ${balance>0 && o.status!=='dispatched'?`<button class="btn btn-sm" onclick="recordPayment('${o.id}')" style="background:#FFFBEB;color:#92400E;border-color:#FDE68A">💰 Record Payment</button>`:''}
-        <button class="btn btn-sm btn-ember btn-xs" onclick="deleteOrder('${o.id}')">✕</button>
+        ${o.status==='pending'?`<button class="btn btn-sm" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;production&quot;]" style="background:#EFF6FF;color:#1E40AF;border-color:#BFDBFE">→ Start Production</button>`:''}
+        ${o.status==='production'?`<button class="btn btn-sm" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;ready&quot;]" style="background:#ECFDF5;color:#065F46;border-color:#A7F3D0">→ Mark Ready</button>`:''}
+        ${o.status==='ready'?`<button class="btn btn-sm" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;dispatched&quot;]" style="background:#F9FAFB;color:#374151;border-color:#E5E7EB">🚚 Dispatch</button>`:''}
+        ${balance>0 && o.status!=='dispatched'?`<button class="btn btn-sm" data-click="recordPayment" data-args="[&quot;${o.id}&quot;]" style="background:#FFFBEB;color:#92400E;border-color:#FDE68A">💰 Record Payment</button>`:''}
+        <button class="btn btn-sm btn-ember btn-xs" data-click="deleteOrder" data-args="[&quot;${o.id}&quot;]">✕</button>
       </div>
     </div>`;
   }).join('');
 }
-function filterOrders(f){ orderFilter=f; renderOrders(); }
-function openNewOrder(){
+export function filterOrders(f){ orderFilter=f; renderOrders(); }
+export function openNewOrder(){
   orderItems = [];
   renderOrderItemsList();
   document.getElementById('ord-item-search').value='';
@@ -98,30 +101,30 @@ function openNewOrder(){
   document.getElementById('order-form-wrap').style.display='block';
   document.getElementById('order-form-wrap').scrollIntoView({behavior:'smooth'});
 }
-function closeOrderForm(){
+export function closeOrderForm(){
   document.getElementById('order-form-wrap').style.display='none';
   document.getElementById('ord-item-dropdown').style.display='none';
 }
-function filterOrderProducts(){
+export function filterOrderProducts(){
   const q = document.getElementById('ord-item-search').value.trim().toLowerCase();
   const dd = document.getElementById('ord-item-dropdown');
   if(!q){dd.style.display='none';return;}
   const matches = S.fg.filter(p=>p.name.toLowerCase().includes(q)).slice(0,25);
   if(!matches.length){dd.style.display='none';return;}
-  dd.innerHTML = matches.map(p=>`<div onclick="selectOrderProduct('${p.name.replace(/'/g,"\\'")}',${p.price||0})"
+  dd.innerHTML = matches.map(p=>`<div data-click="selectOrderProduct" ${argsAttr(p.name, p.price||0)}
     style="padding:9px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"
-    onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+    class="dd-row">
     <span style="font-weight:500;color:var(--text)">${p.name}</span>
     <span style="font-family:var(--mono);font-size:11px;color:var(--text4);margin-left:12px;flex-shrink:0">₹${p.price||0}</span>
   </div>`).join('');
   dd.style.display='block';
 }
-function selectOrderProduct(name, price){
+export function selectOrderProduct(name, price){
   document.getElementById('ord-item-search').value=name;
   document.getElementById('ord-item-price').value=price||'';
   document.getElementById('ord-item-dropdown').style.display='none';
 }
-function addOrderItem(){
+export function addOrderItem(){
   const name = document.getElementById('ord-item-search').value.trim();
   const qty = parseInt(document.getElementById('ord-item-qty').value)||1;
   const price = parseFloat(document.getElementById('ord-item-price').value)||0;
@@ -135,15 +138,15 @@ function addOrderItem(){
   document.getElementById('ord-item-price').value='';
   renderOrderItemsList();
 }
-function changeOrderItemQty(idx, delta){
+export function changeOrderItemQty(idx, delta){
   orderItems[idx].qty = Math.max(1, (orderItems[idx].qty||1)+delta);
   renderOrderItemsList();
 }
-function removeOrderItem(idx){
+export function removeOrderItem(idx){
   orderItems.splice(idx,1);
   renderOrderItemsList();
 }
-function renderOrderItemsList(){
+export function renderOrderItemsList(){
   const el = document.getElementById('ord-items-list');
   const countEl = document.getElementById('ord-items-count');
   if(!orderItems.length){
@@ -171,16 +174,16 @@ function renderOrderItemsList(){
             <td style="padding:10px 12px;font-weight:500;color:var(--text)">${item.name}</td>
             <td style="padding:10px 12px;text-align:right">
               <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
-                <button onclick="changeOrderItemQty(${i},-1)" style="width:22px;height:22px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:var(--text2)">−</button>
+                <button data-click="changeOrderItemQty" data-args="[${i},-1]" style="width:22px;height:22px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:var(--text2)">−</button>
                 <span style="font-family:var(--mono);font-weight:600;min-width:28px;text-align:center">${item.qty}</span>
-                <button onclick="changeOrderItemQty(${i},1)" style="width:22px;height:22px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:var(--text2)">+</button>
+                <button data-click="changeOrderItemQty" data-args="[${i},1]" style="width:22px;height:22px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:var(--text2)">+</button>
               </div>
             </td>
             <td style="padding:10px 12px;text-align:right;font-family:var(--mono)">
-              <input type="number" value="${item.price||0}" onchange="orderItems[${i}].price=parseFloat(this.value)||0;renderOrderItemsList()" style="width:80px;padding:4px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface2);font-size:12px;text-align:right;color:var(--text);outline:none" onfocus="this.style.borderColor='var(--blue)'" onblur="this.style.borderColor='var(--border)'">
+              <input type="number" value="${item.price||0}" data-change="setOrderItemPrice" data-args="[${i}]" style="width:80px;padding:4px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface2);font-size:12px;text-align:right;color:var(--text);outline:none">
             </td>
             <td style="padding:10px 12px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--blue)">₹${((item.price||0)*item.qty).toLocaleString('en-IN')}</td>
-            <td style="padding:10px 12px"><button onclick="removeOrderItem(${i})" style="background:none;border:none;color:var(--ember);cursor:pointer;font-size:16px;padding:2px 4px">✕</button></td>
+            <td style="padding:10px 12px"><button data-click="removeOrderItem" data-args="[${i}]" style="background:none;border:none;color:var(--ember);cursor:pointer;font-size:16px;padding:2px 4px">✕</button></td>
           </tr>`).join('')}
       </tbody>
     </table>
@@ -188,13 +191,13 @@ function renderOrderItemsList(){
   if(countEl) countEl.textContent=`${orderItems.length} product${orderItems.length!==1?'s':''} · ${orderItems.reduce((a,i)=>a+i.qty,0)} total units`;
   updateOrderTotal();
 }
-function updateOrderTotal(){
+export function updateOrderTotal(){
   const total = orderItems.reduce((a,i)=>a+(i.price||0)*i.qty,0);
   document.getElementById('ord-amount').value=total;
   document.getElementById('ord-total-display').textContent='₹'+total.toLocaleString('en-IN');
 }
 // Import from Sheets removed
-function importOrdersFromSheets(){
+export function importOrdersFromSheets(){
   if(!S.sheetsUrl){alert('Google Sheets URL not set. Go to Settings → Google Sheets.');return;}
   const statusEl = document.getElementById('import-status');
   statusEl.textContent='⏳ Fetching...';
@@ -276,7 +279,7 @@ function importOrdersFromSheets(){
     }
   },5000);
 }
-function saveOrder(){
+export function saveOrder(){
   const customer = document.getElementById('ord-customer').value.trim();
   const amount = parseFloat(document.getElementById('ord-amount').value)||0;
   if(!customer){alert('Enter customer name.');return;}
@@ -331,7 +334,7 @@ function saveOrder(){
   renderOrders();
   renderHome();
 }
-function updateOrderStatus(id, status){
+export function updateOrderStatus(id, status){
   const o = S.orders.find(o=>o.id===id);
   if(!o) return;
   const prev = o.status;
@@ -379,7 +382,7 @@ function updateOrderStatus(id, status){
   renderPayments();
   renderHome();
 }
-function recordPayment(id){
+export function recordPayment(id){
   const o = S.orders.find(o=>o.id===id);
   if(!o) return;
   const balance = o.amount - o.advance;
@@ -392,7 +395,7 @@ Enter amount received:`));
   renderOrders(); renderPayments(); renderHome();
   alert(`✓ Payment of ${fmt(amt)} recorded. New balance: ${fmt(o.amount-o.advance)}`);
 }
-function deleteOrder(id){
+export function deleteOrder(id){
   if(!confirm('Delete this order?')) return;
   S.orders = S.orders.filter(o=>o.id!==id);
   persist(); renderOrders(); renderPayments(); renderHome();
@@ -401,38 +404,13 @@ function deleteOrder(id){
 
 // Status pill colours. Presentation, so they live with the screen that
 // shows them rather than in shared formatting.
-function orderStatusColor(s){return s==='pending'?'#92400E':s==='production'?'#1E40AF':s==='ready'?'#065F46':'#6B7280';}
-function orderStatusBg(s){return s==='pending'?'var(--amber-l)':s==='production'?'var(--blue-l)':s==='ready'?'var(--jade-l)':'var(--surface2)';}
+export function orderStatusColor(s){return s==='pending'?'#92400E':s==='production'?'#1E40AF':s==='ready'?'#065F46':'#6B7280';}
+export function orderStatusBg(s){return s==='pending'?'var(--amber-l)':s==='production'?'var(--blue-l)':s==='ready'?'var(--jade-l)':'var(--surface2)';}
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  orderStatusColor, orderStatusBg,
-  renderOrders,
-  filterOrders,
-  openNewOrder,
-  closeOrderForm,
-  filterOrderProducts,
-  selectOrderProduct,
-  addOrderItem,
-  changeOrderItemQty,
-  removeOrderItem,
-  renderOrderItemsList,
-  updateOrderTotal,
-  importOrdersFromSheets,
-  saveOrder,
-  updateOrderStatus,
-  recordPayment,
-  deleteOrder,
-});
 
-// State the rest of the app reads. Re-published on each change by the
-// functions above; mirrored here so the initial value is visible too.
-window.orderItems = orderItems;
-window.orderFilter = orderFilter;
+// Was an inline `orderItems[i].price = parseFloat(this.value)` mutation.
+export function setOrderItemPrice(i, ev){
+  orderItems[i].price = parseFloat(ev && ev.target ? ev.target.value : 0) || 0;
+  renderOrderItemsList();
+}
+

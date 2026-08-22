@@ -12,11 +12,12 @@
 import { calcOT } from '../core/calc.js';
 import { fmt, todayStr } from '../core/format.js';
 import { S } from '../core/state.js';
+import { persist, pushAttendanceLive } from '../core/sync.js';
 
 // ── screen state ──
 let activeAttTab = 'attendance';
 
-function switchAttTab(tab){
+export function switchAttTab(tab){
   activeAttTab = tab;
   document.getElementById('att-tab-attendance').style.display = tab==='attendance' ? 'block' : 'none';
   document.getElementById('att-tab-ot').style.display = tab==='ot' ? 'block' : 'none';
@@ -25,7 +26,7 @@ function switchAttTab(tab){
   });
   if(tab==='ot') renderOTTab();
 }
-function renderAtt(){
+export function renderAtt(){
   const d=document.getElementById('work-date');
   // DISPLAY the working date — do not overwrite it. This used to assign
   // todayStr() on every render, which silently undid Save Day: saveDay()
@@ -38,7 +39,7 @@ function renderAtt(){
     updAttMet();return;
   }
   document.getElementById('att-grid').innerHTML=S.lab.map(l=>`
-    <div class="wc ${l.present?'present':'absent'}" onclick="togAtt(${l.id})">
+    <div class="wc ${l.present?'present':'absent'}" data-click="togAtt" data-args="[${l.id}]">
       <div>
         <div class="wn">${l.name}${l.isSup?' ⭐':''}</div>
         <div class="ws">${l.role} · ₹${l.wage}/day</div>
@@ -48,7 +49,7 @@ function renderAtt(){
   updAttMet();
   if(activeAttTab==='ot') renderOTTab();
 }
-function renderOTTab(){
+export function renderOTTab(){
   const present = S.lab.filter(l=>l.present);
   const otEl = document.getElementById('ot-grid');
   if(!otEl) return;
@@ -75,7 +76,7 @@ function renderOTTab(){
         <td class="num">₹${l.wage}</td>
         <td class="num">
           <input type="number" value="${hrs}" min="0" max="12" step="0.5"
-            onchange="setOTHours(${l.id},this.value)"
+            data-change="setOTHours" data-args="[${l.id}]"
             style="width:60px;padding:4px 7px;border:1px solid var(--border);border-radius:5px;text-align:right;font-size:12px;background:var(--surface2)">
           hrs
         </td>
@@ -83,7 +84,7 @@ function renderOTTab(){
           ${otPay>0?'₹'+otPay.toLocaleString('en-IN'):'—'}
         </td>
         <td>
-          <button class="btn btn-sm ${l.doingOT?'btn-amber':'btn-jade'}" onclick="togOT(${l.id})">
+          <button class="btn btn-sm ${l.doingOT?'btn-amber':'btn-jade'}" data-click="togOT" data-args="[${l.id}]">
             ${l.doingOT?'✓ OT':'Mark OT'}
           </button>
         </td>
@@ -91,7 +92,10 @@ function renderOTTab(){
     }).join('')}</tbody>
   </table>`;
 }
-function setOTHours(id, val){
+// The delegated layer passes the event as the trailing argument, so the
+// value is read from the element rather than baked into the markup.
+export function setOTHours(id, ev){
+  const val = ev && ev.target ? ev.target.value : 0;
   const l = S.lab.find(x=>x.id===id);
   if(!l) return;
   l.otHours = parseFloat(val)||0;
@@ -101,8 +105,8 @@ function setOTHours(id, val){
   renderOTTab();
   updAttMet();
 }
-function togAtt(id){const l=S.lab.find(l=>l.id===id);l.present^=1;if(!l.present){l.doingOT=false;l.otHours=0;}persist();renderAtt();if(typeof pushAttendanceLive==="function")pushAttendanceLive();}
-function togOT(id){
+export function togAtt(id){const l=S.lab.find(l=>l.id===id);l.present^=1;if(!l.present){l.doingOT=false;l.otHours=0;}persist();renderAtt();if(typeof pushAttendanceLive==="function")pushAttendanceLive();}
+export function togOT(id){
   const l=S.lab.find(l=>l.id===id);
   if(!l) return;
   l.doingOT^=1;
@@ -111,8 +115,8 @@ function togOT(id){
   renderOTTab();
   updAttMet();
 }
-function markAll(v){S.lab.forEach(l=>{l.present=!!v;if(!v){l.doingOT=false;l.otHours=0;}});persist();renderAtt();if(typeof pushAttendanceLive==="function")pushAttendanceLive();}
-function updAttMet(){
+export function markAll(v){S.lab.forEach(l=>{l.present=!!v;if(!v){l.doingOT=false;l.otHours=0;}});persist();renderAtt();if(typeof pushAttendanceLive==="function")pushAttendanceLive();}
+export function updAttMet(){
   const p=S.lab.filter(l=>l.present);
   const bw=p.reduce((a,l)=>a+l.wage,0);
   const ot=p.reduce((a,l)=>a+calcOT(l),0);
@@ -124,25 +128,3 @@ function updAttMet(){
   document.getElementById('a-total-lab').textContent=fmt(bw+ot);
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  switchAttTab,
-  renderAtt,
-  renderOTTab,
-  setOTHours,
-  togAtt,
-  togOT,
-  markAll,
-  updAttMet,
-});
-
-// State the rest of the app reads. Re-published on each change by the
-// functions above; mirrored here so the initial value is visible too.
-window.activeAttTab = activeAttTab;
