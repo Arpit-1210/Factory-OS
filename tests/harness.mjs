@@ -36,6 +36,7 @@ const CORE_MODULES = [
   'src/js/templates/index.js',
   'src/js/components/screen-error.js',
   'src/js/components/sidebar.js',
+  'src/js/components/assign-modal.js',
   'src/js/screens/att.js',
   'src/js/screens/bom.js',
   'src/js/screens/dashboard.js',
@@ -55,6 +56,7 @@ const CORE_MODULES = [
   'src/js/screens/setup.js',
   'src/js/screens/sheets.js',
   'src/js/screens/stock.js',
+  'src/js/screens/transfers.js',
 ];
 
 /**
