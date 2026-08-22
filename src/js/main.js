@@ -22,14 +22,22 @@
 //  and shared-logic modules will be hung off as app.js is broken up.
 // ══════════════════════════════════════════════════════════════════
 
-// Shared logic first — app.js reads these through the window bridge described
-// in each module, so they must be evaluated before it.
+// Shared logic and infrastructure first — app.js and the screens read
+// these through the window bridge each module installs.
 import './core/config.js';
 import './core/format.js';
 import './core/state.js';
 import './core/calc.js';
 import './core/session.js';
+import './core/sheets-sync.js';
+import './core/xlsx.js';
+import './core/sync.js';
+import './core/router.js';
+import './core/auth.js';
+import './core/day-rollover.js';
 import './templates/index.js';
+import './components/screen-error.js';
+import './components/sidebar.js';
 
 // Screens — each owns its render logic and handlers; its markup lives
 // alongside in templates/screens/.
