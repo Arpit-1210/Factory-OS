@@ -1,8 +1,10 @@
 // ── APP HARNESS ──
-// Boots src/js/supabase-db.js + src/js/app.js inside a vm context, in the same
-// order index.html loads them, and hands back the resulting window. Timers are
-// captured rather than scheduled so tests stay deterministic and the process
-// can exit (app.js installs a 60s rollover interval at load).
+// Boots the real application the way the browser does — one bundled module
+// graph entered through src/js/main.js — inside a vm context with a small DOM
+// stub, and hands back the resulting window.
+//
+// Timers are captured rather than scheduled so tests stay deterministic and
+// the process can exit (a 60s rollover check is installed at boot).
 
 import vm from 'node:vm';
 import esbuild from 'esbuild';
@@ -12,81 +14,79 @@ import { fileURLToPath } from 'node:url';
 import { createDocument, createElement, createLocalStorage } from './dom-stub.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// STRICT=1 evaluates the app under strict mode, which is what ES modules
-// would impose. Used to prove the codebase is ready for a module split before
-// committing to one.
 const read = (p) => {
   const src = fs.readFileSync(path.join(ROOT, p), 'utf8');
   return process.env.STRICT ? '"use strict";\n' + src : src;
 };
 
-// Shared-logic modules, in the order main.js imports them.
-const CORE_MODULES = [
-  'src/js/core/config.js',
-  'src/js/core/format.js',
-  'src/js/core/state.js',
-  'src/js/core/calc.js',
-  'src/js/core/session.js',
-  'src/js/core/sheets-sync.js',
-  'src/js/core/xlsx.js',
-  'src/js/core/sync.js',
-  'src/js/core/router.js',
-  'src/js/core/auth.js',
-  'src/js/core/day-rollover.js',
-  'src/js/templates/index.js',
-  'src/js/components/screen-error.js',
-  'src/js/components/sidebar.js',
-  'src/js/components/assign-modal.js',
-  'src/js/screens/att.js',
-  'src/js/screens/bom.js',
-  'src/js/screens/dashboard.js',
-  'src/js/screens/day.js',
-  'src/js/screens/dispatch.js',
-  'src/js/screens/docs.js',
-  'src/js/screens/exports.js',
-  'src/js/screens/fgstock.js',
-  'src/js/screens/inventory.js',
-  'src/js/screens/month.js',
-  'src/js/screens/orders.js',
-  'src/js/screens/payments.js',
-  'src/js/screens/production.js',
-  'src/js/screens/raw.js',
-  'src/js/screens/rmpurchase.js',
-  'src/js/screens/salary.js',
-  'src/js/screens/setup.js',
-  'src/js/screens/sheets.js',
-  'src/js/screens/stock.js',
-  'src/js/screens/transfers.js',
+// Modules whose exports the tests reach into. Screens are discovered so a new
+// one is covered without editing this list.
+const TEST_MODULES = [
+  'core/config', 'core/format', 'core/state', 'core/seed-data', 'core/calc',
+  'core/session', 'core/router', 'core/auth', 'core/sync', 'core/sheets-sync',
+  'core/xlsx', 'core/day-rollover', 'core/actions', 'templates/index',
+  'components/sidebar', 'components/screen-error', 'components/assign-modal',
+  ...fs.readdirSync(path.join(ROOT, 'src/js/screens'))
+    .filter(f => f.endsWith('.js'))
+    .map(f => 'screens/' + f.replace(/\.js$/, '')),
 ];
 
 /**
- * Bundle the whole core graph as ONE unit, exactly as Vite does for the
- * browser.
+ * Bundle the real entry point, plus a TEST-ONLY surface.
  *
- * Bundling each module separately looks equivalent and is not: esbuild inlines
- * each entry's dependencies, so calc.js would carry its own private copy of
- * state.js — a second `S`, a second seeded catalogue, and two window bridges
- * racing to publish. Tests still passed, because the last bridge write won and
- * everything happened to funnel through that instance. That is precisely the
- * kind of test/production divergence worth refusing: the browser has one
- * instance of each module and the tests must too.
+ * The app publishes nothing to `window` any more: markup names actions
+ * (`data-click="saveOrder"`) and core/actions.js resolves them through real
+ * imports. That is the point of the refactor, but it leaves tests with no way
+ * to reach a module's internals.
  *
- * Memoised — 150+ tests each call boot(), and re-bundling per call would
+ * So the bundle appends live getters for every exported binding — getters, not
+ * a snapshot. `S` is replaced wholesale by setS() on a remote pull, and a copy
+ * would silently go stale, which is precisely the class of bug this refactor
+ * removed from production. A setter is included so a test can stub a renderer.
+ *
+ * None of this ships: index.html loads main.js, which has no such surface.
+ *
+ * The whole graph is bundled as ONE unit, as Vite does. Bundling modules
+ * separately looks equivalent and is not — esbuild inlines each entry's
+ * dependencies, so two entries would each carry a private copy of state.js,
+ * meaning a second `S` and a second seeded catalogue.
+ *
+ * Memoised: ~200 tests each call boot(), and re-bundling per call would
  * dominate the run.
  */
-let _coreBundle = null;
-function bundleCore() {
-  if (_coreBundle === null) {
-    const entry = CORE_MODULES.map(m => `import ${JSON.stringify('./' + m)};`).join('\n');
-    const out = esbuild.buildSync({
-      stdin: { contents: entry, resolveDir: ROOT, loader: 'js' },
-      bundle: true, format: 'iife', write: false,
-      platform: 'browser', target: 'es2020',
-    });
-    _coreBundle = out.outputFiles[0].text;
-    if (process.env.STRICT) _coreBundle = '"use strict";\n' + _coreBundle;
-  }
-  return _coreBundle;
+let _bundle = null;
+function bundleApp() {
+  if (_bundle !== null) return _bundle;
+
+  const imports = TEST_MODULES
+    .map((m, i) => `import * as m${i} from './src/js/${m}.js';`)
+    .join('\n');
+  const list = TEST_MODULES.map((_, i) => `m${i}`).join(', ');
+
+  const entry = [
+    'window.__stub = {};',
+    "import './src/js/main.js';",
+    imports,
+    `for (const ns of [${list}]) {`,
+    '  for (const k of Object.keys(ns)) {',
+    '    const from = ns;',
+    '    Object.defineProperty(window, k, {',
+    '      configurable: true,',
+    '      get() { return k in window.__stub ? window.__stub[k] : from[k]; },',
+    '      set(v) { window.__stub[k] = v; },',
+    '    });',
+    '  }',
+    '}',
+  ].join('\n');
+
+  const out = esbuild.buildSync({
+    stdin: { contents: entry, resolveDir: ROOT, loader: 'js' },
+    bundle: true, format: 'iife', write: false,
+    platform: 'browser', target: 'es2020',
+  });
+  _bundle = out.outputFiles[0].text;
+  if (process.env.STRICT) _bundle = '"use strict";\n' + _bundle;
+  return _bundle;
 }
 
 export function boot(opts = {}) {
@@ -115,7 +115,7 @@ export function boot(opts = {}) {
     clearTimeout: () => {},
     setInterval: (fn, ms) => { timers.intervals.push({ fn, ms }); return timers.intervals.length; },
     clearInterval: () => {},
-    requestAnimationFrame: (fn) => { timers.timeouts.push({ fn, ms: 0 }); return 0 },
+    requestAnimationFrame: (fn) => { timers.timeouts.push({ fn, ms: 0 }); return 0; },
     alert: (m) => { logs.log.push(['alert', m]); },
     confirm: () => true,
     prompt: () => null,
@@ -140,45 +140,25 @@ export function boot(opts = {}) {
 
   const ctx = vm.createContext(sandbox);
 
-  // Same order as index.html: data layer first, app second.
+  // Data layer first, exactly as index.html loads it.
   vm.runInContext(read('src/js/supabase-db.js'), ctx, { filename: 'supabase-db.js' });
   if (!opts.dbOnly) {
-    // Same graph as main.js. Core modules are ES modules, which a vm Script
-    // cannot evaluate, so esbuild bundles them into one classic script first —
-    // which is what the browser runs anyway. app.js reads them through the
-    // window bridge those modules install.
-    vm.runInContext(bundleCore(), ctx, { filename: 'core-bundle.js' });
-    vm.runInContext(read('src/js/app.js'), ctx, { filename: 'app.js' });
+    vm.runInContext(bundleApp(), ctx, { filename: 'app-bundle.js' });
   }
 
   return { win: sandbox, ctx, document, localStorage, timers, logs };
 }
 
 /**
- * Load only src/js/supabase-db.js. app.js calls initFirebase() at load
- * (app.js:5009), which inits FactoryDB and replays the outbox before a test
- * gets a look in — this gives the data layer to itself, un-driven.
+ * Load only src/js/supabase-db.js, with no application on top. Booting the app
+ * calls initFirebase(), which inits FactoryDB and replays the offline outbox
+ * before a test gets a look in; this gives the data layer to itself.
  */
 export function bootDb(opts = {}) {
   return boot({ ...opts, dbOnly: true });
 }
 
-/** Replace the app's live state object wholesale. */
-export function setState(win, patch) {
-  const S = win.defaultState();
-  Object.assign(S, patch);
-  win.S = S;
-  // app.js closes over a module-level `S`; window.S is the same binding only if
-  // we push it through the setter the app installed. It uses `var S` at top
-  // level of the script, so assigning window.S rebinds it in the vm context.
-  return win.S;
-}
-
-/**
- * app.js holds its state in a top-level `let S`, which is a lexical binding in
- * the vm context rather than a property of window — so it can be read back but
- * not reassigned from outside. We mutate the live object in place instead.
- */
+/** The live state object. */
 export function getState(ctx) {
   return vm.runInContext('S', ctx);
 }
@@ -196,7 +176,7 @@ export function resetState(ctx, patch = {}) {
   return S;
 }
 
-/** Call an app function by name with the live lexical scope intact. */
+/** Evaluate an expression against the booted app. */
 export function call(ctx, expr) {
   return vm.runInContext(expr, ctx);
 }

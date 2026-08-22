@@ -97,7 +97,7 @@ describe('markProdSeen — the badge only survives a genuinely remote change', (
     const S = resetState(ctx, { workDate: '2026-08-19' });
     S.sessions = [session(9, 'Karan', [team(1, 'Moulding', [], [])])];
     call(ctx, 'markProdSeen()');
-    assert.equal(call(ctx, '_prodSeen'), fingerprint());
+    assert.equal(call(ctx, 'lastSeenFingerprint()'), fingerprint());
   });
 
   test('persist() marks seen, so the user’s own edit never raises a badge', () => {
@@ -110,7 +110,7 @@ describe('markProdSeen — the badge only survives a genuinely remote change', (
     S.sessions[0].teams[0].production.push({ name: 'Chair A', qty: 2, value: 2000 });
     call(ctx, 'persist()');
 
-    assert.equal(call(ctx, '_prodSeen'), fingerprint(), 'local edits are seen by definition');
+    assert.equal(call(ctx, 'lastSeenFingerprint()'), fingerprint(), 'local edits are seen by definition');
   });
 
   test('a remote change leaves the fingerprint diverged, which is what shows the badge', () => {
@@ -121,7 +121,7 @@ describe('markProdSeen — the badge only survives a genuinely remote change', (
     // Simulate what pull() does: another device's row lands in S directly.
     S.sessions.push(session(8, 'Rahul', [team(1, 'Painting', [], [{ name: 'Chair A', qty: 3, value: 3000 }])]));
 
-    assert.notEqual(fingerprint(), call(ctx, '_prodSeen'));
+    assert.notEqual(fingerprint(), call(ctx, 'lastSeenFingerprint()'));
   });
 
   test('hides the badge element when it exists', () => {
@@ -171,7 +171,7 @@ describe('applyProdRefresh — taking the update', () => {
 
     call(ctx, 'applyProdRefresh()');
 
-    assert.equal(call(ctx, '_prodSeen'), fingerprint());
+    assert.equal(call(ctx, 'lastSeenFingerprint()'), fingerprint());
     assert.equal(win.document.getElementById('prod-refresh').style.display, 'none');
   });
 
