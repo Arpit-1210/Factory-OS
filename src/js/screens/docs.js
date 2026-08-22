@@ -9,6 +9,9 @@
 //  imports as the remaining screens move out of app.js.
 // ==================================================================
 
+import { fmt, fmtN, todayStr } from '../core/format.js';
+import { S, uid } from '../core/state.js';
+
 // ── screen state ──
 let docItems = [];
 let docCounter = { quotation:1, invoice:1, challan:1 };
@@ -355,7 +358,14 @@ function clearDoc(){
   updateDocPreview();
 }
 
-// ── bridge (delete once every caller imports instead) ──
+// ── window bridge ──
+// Two things still need these on the global object:
+//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
+//      against `window` and nothing else;
+//   2. app.js, which has no import statements of its own yet.
+// Modules no longer rely on it — screens/ and components/ import from core/
+// directly. Removing the rest means converting the markup to
+// addEventListener, which is its own piece of work.
 Object.assign(window, {
   saveDocAsOrder,
   renderDocs,

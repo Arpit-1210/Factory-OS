@@ -9,6 +9,12 @@
 //  imports as the remaining screens move out of app.js.
 // ==================================================================
 
+import { calcOT } from '../core/calc.js';
+import { STAGES } from '../core/config.js';
+import { fmt, fmtN } from '../core/format.js';
+import { fbEnabled } from '../core/session.js';
+import { S } from '../core/state.js';
+
 function renderDay(){
   const d=new Date(S.workDate+'T00:00:00');
   document.getElementById('day-title').innerHTML=d.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}).replace(/,/,',')+'&nbsp;<span style="color:var(--amber)">'+d.getFullYear()+'</span>';
@@ -153,7 +159,14 @@ function saveDay(){
   }, 3000);
 }
 
-// ── bridge (delete once every caller imports instead) ──
+// ── window bridge ──
+// Two things still need these on the global object:
+//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
+//      against `window` and nothing else;
+//   2. app.js, which has no import statements of its own yet.
+// Modules no longer rely on it — screens/ and components/ import from core/
+// directly. Removing the rest means converting the markup to
+// addEventListener, which is its own piece of work.
 Object.assign(window, {
   renderDay,
   buildPayload,

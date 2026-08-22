@@ -9,6 +9,10 @@
 //  imports as the remaining screens move out of app.js.
 // ==================================================================
 
+import { calcOT } from '../core/calc.js';
+import { fmt, todayStr } from '../core/format.js';
+import { S } from '../core/state.js';
+
 // ── screen state ──
 let activeAttTab = 'attendance';
 
@@ -120,7 +124,14 @@ function updAttMet(){
   document.getElementById('a-total-lab').textContent=fmt(bw+ot);
 }
 
-// ── bridge (delete once every caller imports instead) ──
+// ── window bridge ──
+// Two things still need these on the global object:
+//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
+//      against `window` and nothing else;
+//   2. app.js, which has no import statements of its own yet.
+// Modules no longer rely on it — screens/ and components/ import from core/
+// directly. Removing the rest means converting the markup to
+// addEventListener, which is its own piece of work.
 Object.assign(window, {
   switchAttTab,
   renderAtt,
