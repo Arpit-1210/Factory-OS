@@ -73,7 +73,18 @@ function definedInSource(src) {
 
 function exportedToWindow(src) {
   const found = new Set();
+  // app.js's original block: `window.foo = foo;`
   for (const m of src.matchAll(/window\.([A-Za-z_$][\w$]*)\s*=/g)) found.add(m[1]);
+  // The bridge every extracted module ends with:
+  //   Object.assign(window, { foo, bar, baz });
+  // Missing this form reported a dozen live handlers as dead, while the
+  // runtime check below correctly said they were fine — a reminder that the
+  // source sweep is the weaker of the two and must track how code is written.
+  for (const block of src.matchAll(/Object\.assign\(\s*window\s*,\s*\{([\s\S]*?)\}\s*\)/g)) {
+    // Lookahead, not a match, on the separator: consuming the comma would make
+    // every other entry unmatchable, which silently halved this sweep.
+    for (const m of block[1].matchAll(/(?:^|,)\s*([A-Za-z_$][\w$]*)\s*(?=[,:}]|$)/g)) found.add(m[1]);
+  }
   return found;
 }
 
@@ -127,22 +138,12 @@ describe('every inline handler survives module scope', () => {
 });
 
 describe('handlers wired to markup but never implemented', () => {
-  // These are real dead controls in the shipped app, found by this audit.
-  // The screen error boundary now reports the Transfers one on navigation;
-  // the rest fail on click. Listed explicitly so the count cannot grow
-  // unnoticed, and so fixing one is a visible change to this test.
-  const KNOWN_MISSING = [
-    'closeAssignModal',
-    'emergencyPush',
-    'exportInventory',
-    'exportUnitTransfers',
-    'filterUTItems',
-    'openAssignModal',
-    'renderUTItemDD',
-    'renderUnitTransfers',
-    'restoreFromBackup',
-    'saveUnitTransfer',
-  ];
+  // This audit once found ten: the whole Unit Transfers screen, the assign
+  // modal, and three sync/export buttons — all wired to markup, none defined
+  // anywhere. They have since been implemented, so the list is empty and the
+  // tests below now guard against a new one appearing rather than tracking a
+  // known backlog.
+  const KNOWN_MISSING = [];
 
   test('no NEW undefined handler has been introduced', () => {
     const undef = HANDLERS.filter(h => !DEFINED.has(h)).sort();
