@@ -35,6 +35,8 @@ import './core/sync.js';
 import './core/router.js';
 import './core/auth.js';
 import './core/day-rollover.js';
+
+import './core/actions.js';   // event delegation; imports every screen
 import './templates/index.js';
 import './components/screen-error.js';
 import './components/sidebar.js';

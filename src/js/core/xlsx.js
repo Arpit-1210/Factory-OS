@@ -7,11 +7,11 @@
 //  imports as the remaining screens move out of app.js.
 // ==================================================================
 
-function checkXLSX(){
+export function checkXLSX(){
   if(typeof XLSX==='undefined'){alert('Excel export unavailable — check internet connection.');return false;}
   return true;
 }
-function downloadXLSX(wb, filename){
+export function downloadXLSX(wb, filename){
   try{
     const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
     const blob=new Blob([wbout],{type:'application/octet-stream'});
@@ -23,15 +23,3 @@ function downloadXLSX(wb, filename){
   }catch(e){ XLSX.writeFile(wb,filename); }
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  checkXLSX,
-  downloadXLSX,
-});

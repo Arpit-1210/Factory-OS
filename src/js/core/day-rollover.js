@@ -7,9 +7,15 @@
 //  imports as the remaining screens move out of app.js.
 // ==================================================================
 
+import { LS_KEY } from './config.js';
+import { todayStr } from './format.js';
+import { go } from './router.js';
+import { S } from './state.js';
+import { renderDashboard } from '../screens/dashboard.js';
+
 // ── DAY ROLLOVER ──
 // Adopt a new work date: clear day-specific data, reset attendance
-function isDaySaved(d){
+export function isDaySaved(d){
   if(d && S.workDate && d===S.workDate){
     // current working day can never be "already saved" — clean any stale flag from testing
     if(localStorage.getItem('_day_cleared_'+d)) localStorage.removeItem('_day_cleared_'+d);
@@ -17,7 +23,7 @@ function isDaySaved(d){
   }
   return !!(d && ((S.ledger||[]).some(function(e){return e.date===d;}) || localStorage.getItem('_day_cleared_'+d)));
 }
-function adoptWorkDate(newDate, savedDate){
+export function adoptWorkDate(newDate, savedDate){
   if(savedDate) localStorage.setItem('_day_cleared_'+savedDate,'1');
   // Move to the new date BEFORE filtering. isDaySaved() treats S.workDate as
   // "the open day, never saved" and clears its _day_cleared_ flag as a side
@@ -39,7 +45,7 @@ function adoptWorkDate(newDate, savedDate){
   if(sid) try{go(sid.replace('sc-',''));}catch(e){}
 }
 // Auto-advance if our workDate is in the past AND that day was already saved
-function checkDayRollover(){
+export function checkDayRollover(){
   if(!S||!S.workDate) return;
   // Prune leftover sessions/rawLog from days already saved (safe: they live in the ledger)
   var pruned=false;
@@ -60,16 +66,3 @@ function checkDayRollover(){
   // If not saved: leave data alone — the day still needs to be saved manually
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  isDaySaved,
-  adoptWorkDate,
-  checkDayRollover,
-});

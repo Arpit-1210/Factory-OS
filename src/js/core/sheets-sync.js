@@ -7,7 +7,10 @@
 //  imports as the remaining screens move out of app.js.
 // ==================================================================
 
-function sendGet(url, params){
+import { S } from './state.js';
+import { updateSyncDot } from './sync.js';
+
+export function sendGet(url, params){
   const fullUrl = url + '?' + params;
   // Script tag is the ONLY method that works 100% cross-origin on ALL browsers
   // including Safari, Edge, Chrome, Firefox, and mobile — no CORS issues ever
@@ -17,7 +20,7 @@ function sendGet(url, params){
   s.onerror = function(){ try{if(s.parentNode)s.parentNode.removeChild(s);}catch(e){} };
   document.head.appendChild(s);
 }
-function sendViaImage(url, payload){
+export function sendViaImage(url, payload){
   // Split into small chunks — each well under URL limit
 
   // Chunk 1: Summary row (always tiny)
@@ -54,23 +57,9 @@ function sendViaImage(url, payload){
 
   return Promise.resolve(true);
 }
-function setSyncStatus(s,t){
+export function setSyncStatus(s,t){
   // Called during init before DOM may be ready — guard silently
   try{ updateSyncDot(s==='ok'?'ok':s==='err'?'err':'syncing'); }catch(e){}
 }
-function updateSyncStatus(){ S.sheetsUrl?setSyncStatus('ok','Connected'):setSyncStatus('','Not connected'); }
+export function updateSyncStatus(){ S.sheetsUrl?setSyncStatus('ok','Connected'):setSyncStatus('','Not connected'); }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  sendGet,
-  sendViaImage,
-  setSyncStatus,
-  updateSyncStatus,
-});
