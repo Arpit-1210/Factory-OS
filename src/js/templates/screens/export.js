@@ -12,10 +12,10 @@ export default `<div class="screen" id="sc-export">
       <div class="fld"><label>To Date</label><input type="date" id="exp-to"></div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
-      <button class="btn btn-sm" onclick="setExpRange('today')">Today</button>
-      <button class="btn btn-sm" onclick="setExpRange('week')">This Week</button>
-      <button class="btn btn-sm" onclick="setExpRange('month')">This Month</button>
-      <button class="btn btn-sm" onclick="setExpRange('all')">All Time</button>
+      <button class="btn btn-sm" data-click="setExpRange" data-args="[&quot;today&quot;]">Today</button>
+      <button class="btn btn-sm" data-click="setExpRange" data-args="[&quot;week&quot;]">This Week</button>
+      <button class="btn btn-sm" data-click="setExpRange" data-args="[&quot;month&quot;]">This Month</button>
+      <button class="btn btn-sm" data-click="setExpRange" data-args="[&quot;all&quot;]">All Time</button>
     </div>
   </div>
 
@@ -24,38 +24,38 @@ export default `<div class="screen" id="sc-export">
       <div style="font-size:36px;margin-bottom:12px">👷</div>
       <div style="font-weight:700;font-size:14px;margin-bottom:6px">Attendance Report</div>
       <div style="font-size:11px;color:var(--text4);margin-bottom:14px">Workers present/absent with wages</div>
-      <button class="btn btn-blue btn-full" onclick="exportAttendance()">📊 Download</button>
+      <button class="btn btn-blue btn-full" data-click="exportAttendance">📊 Download</button>
     </div>
     <div class="card" style="text-align:center">
       <div style="font-size:36px;margin-bottom:12px">🏭</div>
       <div style="font-weight:700;font-size:14px;margin-bottom:6px">Production Report</div>
       <div style="font-size:11px;color:var(--text4);margin-bottom:14px">Production by stage, product, supervisor</div>
-      <button class="btn btn-blue btn-full" onclick="exportProduction()">📊 Download</button>
+      <button class="btn btn-blue btn-full" data-click="exportProduction">📊 Download</button>
     </div>
     <div class="card" style="text-align:center">
       <div style="font-size:36px;margin-bottom:12px">📋</div>
       <div style="font-weight:700;font-size:14px;margin-bottom:6px">Orders Report</div>
       <div style="font-size:11px;color:var(--text4);margin-bottom:14px">All orders with status, amount, balance</div>
-      <button class="btn btn-blue btn-full" onclick="exportOrders()">📊 Download</button>
+      <button class="btn btn-blue btn-full" data-click="exportOrders">📊 Download</button>
     </div>
     <div class="card" style="text-align:center">
       <div style="font-size:36px;margin-bottom:12px">💼</div>
       <div style="font-weight:700;font-size:14px;margin-bottom:6px">Salary Report</div>
       <div style="font-size:11px;color:var(--text4);margin-bottom:14px">Monthly payroll for all workers</div>
       <div class="fld" style="margin-bottom:10px;text-align:left"><label>Month</label><input type="month" id="export-sal-month"></div>
-      <button class="btn btn-blue btn-full" onclick="exportSalaryExcel()">📊 Download</button>
+      <button class="btn btn-blue btn-full" data-click="exportSalaryExcel">📊 Download</button>
     </div>
     <div class="card" style="text-align:center">
       <div style="font-size:36px;margin-bottom:12px">📦</div>
       <div style="font-weight:700;font-size:14px;margin-bottom:6px">Inventory Report</div>
       <div style="font-size:11px;color:var(--text4);margin-bottom:14px">RM stock + FG stock across all stages</div>
-      <button class="btn btn-blue btn-full" onclick="exportInventory()">📊 Download</button>
+      <button class="btn btn-blue btn-full" data-click="exportInventory">📊 Download</button>
     </div>
     <div class="card" style="text-align:center">
       <div style="font-size:36px;margin-bottom:12px">💰</div>
       <div style="font-weight:700;font-size:14px;margin-bottom:6px">P&amp;L Report</div>
       <div style="font-size:11px;color:var(--text4);margin-bottom:14px">Daily profit/loss ledger history</div>
-      <button class="btn btn-blue btn-full" onclick="exportPnL()">📊 Download</button>
+      <button class="btn btn-blue btn-full" data-click="exportPnL">📊 Download</button>
     </div>
   </div>
 </div>`;

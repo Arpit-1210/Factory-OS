@@ -34,16 +34,16 @@ export default `<!-- ── LOGIN ── -->
 
         <div class="fld" style="margin-bottom:10px">
           <label>Email</label>
-          <input class="login-input" type="email" id="login-email" placeholder="you@example.com" onkeydown="if(event.key==='Enter')document.getElementById('login-pwd').focus()" style="margin-bottom:0">
+          <input class="login-input" type="email" id="login-email" placeholder="you@example.com" data-keydown="emailKeydown" style="margin-bottom:0">
         </div>
 
         <div style="position:relative;margin-bottom:14px">
           <label style="font-family:var(--mono);font-size:9px;color:var(--text4);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:5px;font-weight:600">Password</label>
-          <input class="login-input" type="password" id="login-pwd" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()" style="margin-bottom:0;padding-right:44px">
-          <span style="position:absolute;right:14px;bottom:10px;color:var(--text4);font-size:16px;cursor:pointer" onclick="togglePwd()">👁</span>
+          <input class="login-input" type="password" id="login-pwd" placeholder="Enter password" data-keydown="passwordKeydown" style="margin-bottom:0;padding-right:44px">
+          <span style="position:absolute;right:14px;bottom:10px;color:var(--text4);font-size:16px;cursor:pointer" data-click="togglePwd">👁</span>
         </div>
 
-        <button class="login-btn" onclick="doLogin()">
+        <button class="login-btn" data-click="doLogin">
           <span>Sign In</span>
           <span style="margin-left:6px">→</span>
         </button>
@@ -84,71 +84,71 @@ export default `<!-- ── LOGIN ── -->
     </div>
 
     <!-- Dashboard (standalone) -->
-    <div class="sb-standalone active" id="sn-dashboard" onclick="go('dashboard')">
+    <div class="sb-standalone active" id="sn-dashboard" data-click="go" data-args="[&quot;dashboard&quot;]">
       <span class="si">🏠</span><span>Dashboard</span>
     </div>
 
     <!-- SUPERVISOR SECTION -->
     <div class="sb-section-card" id="sec-supervisor">
-      <div class="sb-section-header" onclick="toggleSection('sec-supervisor')">
+      <div class="sb-section-header" data-click="toggleSection" data-args="[&quot;sec-supervisor&quot;]">
         <span class="icon">👷</span>
         <span>Supervisor</span>
         <span class="chevron">›</span>
       </div>
       <div class="sb-items">
-        <div class="sb-item" id="sn-att" onclick="go('att')"><span class="si">✅</span><span class="sl">Attendance</span></div>
-        <div class="sb-item" id="sn-sup" onclick="go('sup')"><span class="si">👷</span><span class="sl">Teams & Production</span></div>
-        <div class="sb-item" id="sn-raw" onclick="go('raw')"><span class="si">🧪</span><span class="sl">Issue RM</span></div>
-        <div class="sb-item" id="sn-day" onclick="go('day')"><span class="si">📋</span><span class="sl">Day Sheet</span></div>
+        <div class="sb-item" id="sn-att" data-click="go" data-args="[&quot;att&quot;]"><span class="si">✅</span><span class="sl">Attendance</span></div>
+        <div class="sb-item" id="sn-sup" data-click="go" data-args="[&quot;sup&quot;]"><span class="si">👷</span><span class="sl">Teams & Production</span></div>
+        <div class="sb-item" id="sn-raw" data-click="go" data-args="[&quot;raw&quot;]"><span class="si">🧪</span><span class="sl">Issue RM</span></div>
+        <div class="sb-item" id="sn-day" data-click="go" data-args="[&quot;day&quot;]"><span class="si">📋</span><span class="sl">Day Sheet</span></div>
       </div>
     </div>
 
     <!-- OWNER SECTION -->
     <div class="sb-section-card" id="sec-owner">
-      <div class="sb-section-header" onclick="toggleSection('sec-owner')">
+      <div class="sb-section-header" data-click="toggleSection" data-args="[&quot;sec-owner&quot;]">
         <span class="icon">👨‍💼</span>
         <span>Owner</span>
         <span class="chevron">›</span>
       </div>
       <div class="sb-items">
-        <div class="sb-item" id="sn-orders" onclick="go('orders')"><span class="si">📋</span><span class="sl">Orders</span></div>
-        <div class="sb-item" id="sn-payments" onclick="go('payments')"><span class="si">💰</span><span class="sl">Payments</span></div>
-        <div class="sb-item" id="sn-day" onclick="go('day')"><span class="si">📋</span><span class="sl">Day Sheet</span></div>
-        <div class="sb-item" id="sn-dispatch" onclick="go('dispatch')"><span class="si">🚚</span><span class="sl">Dispatch</span></div>
-        <div class="sb-item" id="sn-transfers" onclick="go('transfers')"><span class="si">🔄</span><span class="sl">Unit 2 Transfers</span></div>
-        <div class="sb-item" id="sn-salary" onclick="go('salary')"><span class="si">💼</span><span class="sl">Salary</span></div>
-        <div class="sb-item" id="sn-month" onclick="go('month')"><span class="si">📅</span><span class="sl">Monthly Report</span></div>
-        <div class="sb-item" id="sn-docs" onclick="go('docs')"><span class="si">📄</span><span class="sl">Quotation / Invoice</span></div>
-        <div class="sb-item" id="sn-export" onclick="go('export')"><span class="si">📊</span><span class="sl">Excel Export</span></div>
+        <div class="sb-item" id="sn-orders" data-click="go" data-args="[&quot;orders&quot;]"><span class="si">📋</span><span class="sl">Orders</span></div>
+        <div class="sb-item" id="sn-payments" data-click="go" data-args="[&quot;payments&quot;]"><span class="si">💰</span><span class="sl">Payments</span></div>
+        <div class="sb-item" id="sn-day" data-click="go" data-args="[&quot;day&quot;]"><span class="si">📋</span><span class="sl">Day Sheet</span></div>
+        <div class="sb-item" id="sn-dispatch" data-click="go" data-args="[&quot;dispatch&quot;]"><span class="si">🚚</span><span class="sl">Dispatch</span></div>
+        <div class="sb-item" id="sn-transfers" data-click="go" data-args="[&quot;transfers&quot;]"><span class="si">🔄</span><span class="sl">Unit 2 Transfers</span></div>
+        <div class="sb-item" id="sn-salary" data-click="go" data-args="[&quot;salary&quot;]"><span class="si">💼</span><span class="sl">Salary</span></div>
+        <div class="sb-item" id="sn-month" data-click="go" data-args="[&quot;month&quot;]"><span class="si">📅</span><span class="sl">Monthly Report</span></div>
+        <div class="sb-item" id="sn-docs" data-click="go" data-args="[&quot;docs&quot;]"><span class="si">📄</span><span class="sl">Quotation / Invoice</span></div>
+        <div class="sb-item" id="sn-export" data-click="go" data-args="[&quot;export&quot;]"><span class="si">📊</span><span class="sl">Excel Export</span></div>
       </div>
     </div>
 
     <!-- INVENTORY SECTION -->
     <div class="sb-section-card" id="sec-inventory">
-      <div class="sb-section-header" onclick="toggleSection('sec-inventory')">
+      <div class="sb-section-header" data-click="toggleSection" data-args="[&quot;sec-inventory&quot;]">
         <span class="icon">📦</span>
         <span>Inventory</span>
         <span class="chevron">›</span>
       </div>
       <div class="sb-items">
-        <div class="sb-item" id="sn-inventory" onclick="go('inventory')"><span class="si">📊</span><span class="sl">Daily Snapshot</span></div>
-        <div class="sb-item" id="sn-stock" onclick="go('stock')"><span class="si">🧪</span><span class="sl">RM Stock</span></div>
-        <div class="sb-item" id="sn-rmpurchase" onclick="go('rmpurchase')"><span class="si">🛒</span><span class="sl">RM Purchase</span></div>
-        <div class="sb-item" id="sn-fgstock" onclick="go('fgstock')"><span class="si">📦</span><span class="sl">FG Stock</span></div>
-        <div class="sb-item" id="sn-bom" onclick="go('bom')"><span class="si">📐</span><span class="sl">Bill of Materials</span></div>
+        <div class="sb-item" id="sn-inventory" data-click="go" data-args="[&quot;inventory&quot;]"><span class="si">📊</span><span class="sl">Daily Snapshot</span></div>
+        <div class="sb-item" id="sn-stock" data-click="go" data-args="[&quot;stock&quot;]"><span class="si">🧪</span><span class="sl">RM Stock</span></div>
+        <div class="sb-item" id="sn-rmpurchase" data-click="go" data-args="[&quot;rmpurchase&quot;]"><span class="si">🛒</span><span class="sl">RM Purchase</span></div>
+        <div class="sb-item" id="sn-fgstock" data-click="go" data-args="[&quot;fgstock&quot;]"><span class="si">📦</span><span class="sl">FG Stock</span></div>
+        <div class="sb-item" id="sn-bom" data-click="go" data-args="[&quot;bom&quot;]"><span class="si">📐</span><span class="sl">Bill of Materials</span></div>
       </div>
     </div>
 
     <!-- SETTINGS SECTION -->
     <div class="sb-section-card" id="sec-settings">
-      <div class="sb-section-header" onclick="toggleSection('sec-settings')">
+      <div class="sb-section-header" data-click="toggleSection" data-args="[&quot;sec-settings&quot;]">
         <span class="icon">⚙️</span>
         <span>Settings</span>
         <span class="chevron">›</span>
       </div>
       <div class="sb-items">
-        <div class="sb-item" id="sn-setup" onclick="go('setup')"><span class="si">⚙</span><span class="sl">Setup Catalogue</span></div>
-        <div class="sb-item" id="sn-sheets" onclick="go('sheets')"><span class="si">🔗</span><span class="sl">Google Sheets</span></div>
+        <div class="sb-item" id="sn-setup" data-click="go" data-args="[&quot;setup&quot;]"><span class="si">⚙</span><span class="sl">Setup Catalogue</span></div>
+        <div class="sb-item" id="sn-sheets" data-click="go" data-args="[&quot;sheets&quot;]"><span class="si">🔗</span><span class="sl">Google Sheets</span></div>
       </div>
     </div>
 
@@ -157,17 +157,17 @@ export default `<!-- ── LOGIN ── -->
         <div class="sync-dot syncing" id="sync-status"></div>
         <span id="sync-text">Connecting...</span>
       </div>
-      <button class="logout-btn" onclick="doLogout()">⏻ Logout</button>
+      <button class="logout-btn" data-click="doLogout">⏻ Logout</button>
     </div>
   </div>
 
   <!-- OVERLAY -->
-  <div class="sidebar-overlay" id="sb-overlay" onclick="closeSidebar()" ontouchend="closeSidebar()"></div>
+  <div class="sidebar-overlay" id="sb-overlay" data-click="closeSidebar"></div>
 
   <!-- MAIN -->
   <div class="main">
     <div class="topbar">
-      <button class="menu-btn" onclick="openSidebar()">☰</button>
+      <button class="menu-btn" data-click="openSidebar">☰</button>
       <div class="page-title" id="page-title">Dashboard</div>
       <div class="topbar-r">
         <span class="role-tag" id="role-tag"></span>
@@ -241,7 +241,7 @@ __SCREEN__export
         <div class="ct">Assign to Order</div>
         <div id="assign-product-label" style="font-size:14px;font-weight:600;color:var(--text);margin-top:4px"></div>
       </div>
-      <button class="btn btn-sm" onclick="closeAssignModal()">✕ Close</button>
+      <button class="btn btn-sm" data-click="closeAssignModal">✕ Close</button>
     </div>
     <div id="assign-stock-info" style="font-family:var(--mono);font-size:11px;color:var(--text4);margin-bottom:12px"></div>
     <div id="assign-order-list"></div>

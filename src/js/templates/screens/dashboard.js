@@ -4,9 +4,9 @@
 export default `      <div class="screen active" id="sc-dashboard">
         <!-- Dashboard Tab Bar -->
         <div class="tabs" id="dash-tabs" style="margin-bottom:16px">
-          <div class="tab active" id="dashtab-overview" onclick="switchDashTab('overview')">📊 Overview</div>
-          <div class="tab" id="dashtab-factory" onclick="switchDashTab('factory')">🏭 Factory</div>
-          <div class="tab dash-money-tab" id="dashtab-money" onclick="switchDashTab('money')">💰 Money</div>
+          <div class="tab active" id="dashtab-overview" data-click="switchDashTab" data-args="[&quot;overview&quot;]">📊 Overview</div>
+          <div class="tab" id="dashtab-factory" data-click="switchDashTab" data-args="[&quot;factory&quot;]">🏭 Factory</div>
+          <div class="tab dash-money-tab" id="dashtab-money" data-click="switchDashTab" data-args="[&quot;money&quot;]">💰 Money</div>
         </div>
 
         <!-- Alerts row — always visible -->
@@ -20,7 +20,7 @@ export default `      <div class="screen active" id="sc-dashboard">
           <div class="card" style="margin-top:16px">
             <div class="ch">
               <div class="ct">📋 Production Task Board</div>
-              <button class="btn btn-sm" onclick="go('orders')">All Orders →</button>
+              <button class="btn btn-sm" data-click="go" data-args="[&quot;orders&quot;]">All Orders →</button>
             </div>
             <div id="dash-task-list"></div>
           </div>
@@ -46,7 +46,7 @@ export default `      <div class="screen active" id="sc-dashboard">
           <div class="dash-grid" id="dash-money-cards"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px" class="g2-dash">
             <div class="card">
-              <div class="ch"><div class="ct">📋 Recent Orders</div><button class="btn btn-sm" onclick="go('orders')">View all →</button></div>
+              <div class="ch"><div class="ct">📋 Recent Orders</div><button class="btn btn-sm" data-click="go" data-args="[&quot;orders&quot;]">View all →</button></div>
               <div id="dash-recent-orders"></div>
             </div>
             <div class="card">

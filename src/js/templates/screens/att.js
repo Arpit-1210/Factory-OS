@@ -13,8 +13,8 @@ export default `      <div class="screen" id="sc-att">
         </div>
 
         <div class="tabs" id="att-tabs" style="margin-bottom:16px">
-          <div class="tab active" onclick="switchAttTab('attendance')">✅ Attendance</div>
-          <div class="tab" onclick="switchAttTab('ot')">⏰ Overtime</div>
+          <div class="tab active" data-click="switchAttTab" data-args="[&quot;attendance&quot;]">✅ Attendance</div>
+          <div class="tab" data-click="switchAttTab" data-args="[&quot;ot&quot;]">⏰ Overtime</div>
         </div>
 
         <!-- ATTENDANCE TAB -->
@@ -23,8 +23,8 @@ export default `      <div class="screen" id="sc-att">
             <div class="ch">
               <div class="ct">Tap to mark Present / Absent · ⭐ Supervisor</div>
               <div style="display:flex;gap:6px">
-                <button class="btn btn-jade btn-sm" onclick="markAll(1)">✓ All Present</button>
-                <button class="btn btn-ember btn-sm" onclick="markAll(0)">✗ All Absent</button>
+                <button class="btn btn-jade btn-sm" data-click="markAll" data-args="[1]">✓ All Present</button>
+                <button class="btn btn-ember btn-sm" data-click="markAll" data-args="[0]">✗ All Absent</button>
               </div>
             </div>
             <div class="wg" id="att-grid"></div>
@@ -43,5 +43,5 @@ export default `      <div class="screen" id="sc-att">
           </div>
         </div>
 
-        <button class="btn btn-blue" onclick="go('sup')" style="margin-top:8px">→ Supervisor Teams</button>
+        <button class="btn btn-blue" data-click="go" data-args="[&quot;sup&quot;]" style="margin-top:8px">→ Supervisor Teams</button>
       </div>`;
