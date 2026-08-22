@@ -7,6 +7,32 @@
 //  imports as the remaining screens move out of app.js.
 // ==================================================================
 
+import { clearScreenError, showScreenError } from '../components/screen-error.js';
+import { closeSidebar } from '../components/sidebar.js';
+import { ROLE_ACCESS } from './config.js';
+import { currentRole } from './session.js';
+import { markProdSeen } from '../screens/production.js';
+import { renderSetup } from '../screens/setup.js';
+import { renderSheets } from '../screens/sheets.js';
+import { renderAtt } from '../screens/att.js';
+import { renderSupLogin } from '../screens/production.js';
+import { renderRaw } from '../screens/raw.js';
+import { renderDay } from '../screens/day.js';
+import { initMonthly } from '../screens/month.js';
+import { renderOrders } from '../screens/orders.js';
+import { renderPayments } from '../screens/payments.js';
+import { renderDispatch } from '../screens/dispatch.js';
+import { renderUnitTransfers } from '../screens/transfers.js';
+import { renderSalary } from '../screens/salary.js';
+import { renderExportPage } from '../screens/exports.js';
+import { renderBOM } from '../screens/bom.js';
+import { renderInventory } from '../screens/inventory.js';
+import { renderStock } from '../screens/stock.js';
+import { renderRMPurchase } from '../screens/rmpurchase.js';
+import { renderFGStock } from '../screens/fgstock.js';
+import { renderDashboard } from '../screens/dashboard.js';
+import { renderDocs } from '../screens/docs.js';
+
 // ════ NAVIGATION ════
 const PAGE_TITLES={
   docs:'Documents',
@@ -30,17 +56,24 @@ const PAGE_TITLES={
 // Renderers are referenced lazily by name rather than captured in a map, so a
 // missing one surfaces here as a caught error instead of a ReferenceError at
 // load time.
+// Direct function references, not names looked up on `window`.
+//
+// The string-and-window version was a relic of the inline-handler era: it
+// could only fail at runtime, which is how renderUnitTransfers stayed missing
+// for so long. A renderer that does not exist is now an import error at build
+// time. The error boundary below still catches a renderer that THROWS, which
+// is the failure that can actually reach a user.
 const SCREEN_RENDERERS = {
-  setup:'renderSetup',        sheets:'renderSheets',    att:'renderAtt',
-  sup:'renderSupLogin',       raw:'renderRaw',          day:'renderDay',
-  month:'initMonthly',        orders:'renderOrders',    payments:'renderPayments',
-  dispatch:'renderDispatch',  transfers:'renderUnitTransfers',
-  salary:'renderSalary',      export:'renderExportPage', bom:'renderBOM',
-  inventory:'renderInventory',stock:'renderStock',      rmpurchase:'renderRMPurchase',
-  fgstock:'renderFGStock',    dashboard:'renderDashboard', docs:'renderDocs',
+  setup: renderSetup,        sheets: renderSheets,      att: renderAtt,
+  sup: renderSupLogin,       raw: renderRaw,            day: renderDay,
+  month: initMonthly,        orders: renderOrders,      payments: renderPayments,
+  dispatch: renderDispatch,  transfers: renderUnitTransfers,
+  salary: renderSalary,      export: renderExportPage,  bom: renderBOM,
+  inventory: renderInventory,stock: renderStock,        rmpurchase: renderRMPurchase,
+  fgstock: renderFGStock,    dashboard: renderDashboard, docs: renderDocs,
 };
 
-function go(name){
+export function go(name){
   if(!currentRole){return;}
   const allowed=ROLE_ACCESS[currentRole]||[];
   if(!allowed.includes(name)){alert('Access denied.');return;}
@@ -67,14 +100,9 @@ function go(name){
   // makes a pending-update badge meaningless — either way it is now seen.
   try{ markProdSeen(); }catch(e){}
 }
-function renderScreen(name){
-  const fnName = SCREEN_RENDERERS[name];
-  if(!fnName) return;
-  const fn = window[fnName];
-  if(typeof fn !== 'function'){
-    showScreenError(name, new Error(fnName+'() is not defined — this screen was never implemented'));
-    return;
-  }
+export function renderScreen(name){
+  const fn = SCREEN_RENDERERS[name];
+  if(typeof fn !== 'function') return;
   try{
     clearScreenError(name);
     fn();
@@ -83,16 +111,3 @@ function renderScreen(name){
   }
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  PAGE_TITLES, SCREEN_RENDERERS,
-  go,
-  renderScreen,
-});

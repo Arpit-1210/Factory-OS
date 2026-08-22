@@ -1,11 +1,26 @@
 // Factory OS v2.0 — All features, secrets from .env
 
+// app.js is a module like everything else now: it imports what it uses
+// instead of reading it off the global object.
+import { doLogin } from './core/auth.js';
+import { calcOT } from './core/calc.js';
+import { APPS_SCRIPT_CODE, LS_KEY, SHEETS_URL } from './core/config.js';
+import { checkDayRollover } from './core/day-rollover.js';
+import { updateSyncStatus } from './core/sheets-sync.js';
+import { rawFill } from './screens/raw.js';
+import { todayStr } from './core/format.js';
+import { currentRole, fbEnabled } from './core/session.js';
+import { S, uid } from './core/state.js';
+import { initFirebase, persist, pushToFirebase, updateSyncDot } from './core/sync.js';
+import { appHtml } from './templates/index.js';
+import './core/actions.js';   // installs the delegated event listeners
+
 // Inject screens HTML
 // The app document is assembled from per-screen templates in
 // src/js/templates/. It used to be a 1,069-line static template literal
 // right here, a thousand lines above any of the code that drives it.
 // main.js installs it on window before this file runs.
-document.getElementById('app-root').innerHTML = window.appHtml();
+document.getElementById('app-root').innerHTML = appHtml();
 
 // loadScript() removed — it fetched the Firebase SDK, which Supabase
 // replaced. No caller remained anywhere in src/.
@@ -204,196 +219,17 @@ try{
   try{ document.getElementById('login-page').style.display='flex'; }catch(e2){}
 }
 
-// ── WINDOW EXPORTS (needed for inline onclick handlers) ──
-// ── IMMEDIATE WINDOW EXPORTS (run before any onclick fires) ──
-(function(){
-  if(typeof spBadge === "function") window.spBadge = spBadge;
-  if(typeof defaultState === "function") window.defaultState = defaultState;
-  if(typeof togglePwd === "function") window.togglePwd = togglePwd;
-  if(typeof doLogin === "function") window.doLogin = doLogin;
-  if(typeof onLoginSuccess === "function") window.onLoginSuccess = onLoginSuccess;
-  if(typeof doLogout === "function") window.doLogout = doLogout;
-  if(typeof updateSidebarForRole === "function") window.updateSidebarForRole = updateSidebarForRole;
-  if(typeof toggleSection === "function") window.toggleSection = toggleSection;
-  if(typeof openSection === "function") window.openSection = openSection;
-  if(typeof openSidebar === "function") window.openSidebar = openSidebar;
-  if(typeof closeSidebar === "function") window.closeSidebar = closeSidebar;
-  if(typeof go === "function") window.go = go;
-  if(typeof switchDashTab === "function") window.switchDashTab = switchDashTab;
-  if(typeof renderDashboard === "function") window.renderDashboard = renderDashboard;
-  if(typeof renderTaskBoard === "function") window.renderTaskBoard = renderTaskBoard;
-  if(typeof isOverdue === "function") window.isOverdue = isOverdue;
-  if(typeof orderStatusColor === "function") window.orderStatusColor = orderStatusColor;
-  if(typeof orderStatusBg === "function") window.orderStatusBg = orderStatusBg;
-  if(typeof initFirebase === "function") window.initFirebase = initFirebase;
-  if(typeof scheduleAutoBackup === "function") window.scheduleAutoBackup = scheduleAutoBackup;
-  if(typeof updateSyncDot === "function") window.updateSyncDot = updateSyncDot;
-  if(typeof startFirebaseSync === "function") window.startFirebaseSync = startFirebaseSync;
-  // Both are `async function`, which the original export sweep missed. They are
-  // called from inline markup handlers, and once this file becomes an ES module
-  // its top-level declarations stop being global — only these assignments keep
-  // those buttons alive.
-  if(typeof pushToFirebase === "function") window.pushToFirebase = pushToFirebase;
-  if(typeof runDailyBackup === "function") window.runDailyBackup = runDailyBackup;
-  if(typeof renderScreen === "function") window.renderScreen = renderScreen;
-  if(typeof showScreenError === "function") window.showScreenError = showScreenError;
-  if(typeof clearScreenError === "function") window.clearScreenError = clearScreenError;
-  // applyProdRefresh is reached from the badge's inline onclick, so it has to
-  // be on window like every other handler in this file.
-  if(typeof applyProdRefresh === "function") window.applyProdRefresh = applyProdRefresh;
-  if(typeof prodFingerprint === "function") window.prodFingerprint = prodFingerprint;
-  if(typeof markProdSeen === "function") window.markProdSeen = markProdSeen;
-  if(typeof showProdRefresh === "function") window.showProdRefresh = showProdRefresh;
-  if(typeof persist === "function") window.persist = persist;
-  if(typeof uid === "function") window.uid = uid;
-  if(typeof fmt === "function") window.fmt = fmt;
-  if(typeof fmtN === "function") window.fmtN = fmtN;
-  if(typeof todayStr === "function") window.todayStr = todayStr;
-  if(typeof sendGet === "function") window.sendGet = sendGet;
-  if(typeof sendViaImage === "function") window.sendViaImage = sendViaImage;
-  if(typeof setSyncStatus === "function") window.setSyncStatus = setSyncStatus;
-  if(typeof updateSyncStatus === "function") window.updateSyncStatus = updateSyncStatus;
-  if(typeof uploadRM === "function") window.uploadRM = uploadRM;
-  if(typeof uploadLab === "function") window.uploadLab = uploadLab;
-  if(typeof dlSampleRM === "function") window.dlSampleRM = dlSampleRM;
-  if(typeof dlSampleLab === "function") window.dlSampleLab = dlSampleLab;
-  if(typeof renderSetup === "function") window.renderSetup = renderSetup;
-  if(typeof addRM === "function") window.addRM = addRM;
-  if(typeof delRM === "function") window.delRM = delRM;
-  if(typeof addFG === "function") window.addFG = addFG;
-  if(typeof delFG === "function") window.delFG = delFG;
-  if(typeof addLab === "function") window.addLab = addLab;
-  if(typeof delLab === "function") window.delLab = delLab;
-  if(typeof renderSheets === "function") window.renderSheets = renderSheets;
-  if(typeof saveUrl === "function") window.saveUrl = saveUrl;
-  if(typeof testConnection === "function") window.testConnection = testConnection;
-  if(typeof copyScript === "function") window.copyScript = copyScript;
-  if(typeof switchAttTab === "function") window.switchAttTab = switchAttTab;
-  if(typeof renderAtt === "function") window.renderAtt = renderAtt;
-  if(typeof renderOTTab === "function") window.renderOTTab = renderOTTab;
-  if(typeof setOTHours === "function") window.setOTHours = setOTHours;
-  if(typeof togAtt === "function") window.togAtt = togAtt;
-  if(typeof togOT === "function") window.togOT = togOT;
-  if(typeof markAll === "function") window.markAll = markAll;
-  if(typeof updAttMet === "function") window.updAttMet = updAttMet;
-  if(typeof renderSupLogin === "function") window.renderSupLogin = renderSupLogin;
-  if(typeof delSess === "function") window.delSess = delSess;
-  if(typeof enterSup === "function") window.enterSup = enterSup;
-  if(typeof renderSupWork === "function") window.renderSupWork = renderSupWork;
-  if(typeof renderSupTeamOverview === "function") window.renderSupTeamOverview = renderSupTeamOverview;
-  if(typeof addNewTeam === "function") window.addNewTeam = addNewTeam;
-  if(typeof selectTeam === "function") window.selectTeam = selectTeam;
-  if(typeof deleteTeam === "function") window.deleteTeam = deleteTeam;
-  if(typeof renderSupTeamWork === "function") window.renderSupTeamWork = renderSupTeamWork;
-  if(typeof swStage === "function") window.swStage = swStage;
-  if(typeof swTogTeam === "function") window.swTogTeam = swTogTeam;
-  if(typeof swFill === "function") window.swFill = swFill;
-  if(typeof logProd === "function") window.logProd = logProd;
-  if(typeof delProd === "function") window.delProd = delProd;
-  if(typeof saveSup === "function") window.saveSup = saveSup;
-  if(typeof exitSup === "function") window.exitSup = exitSup;
-  if(typeof updateColorFieldVisibility === "function") window.updateColorFieldVisibility = updateColorFieldVisibility;
-  if(typeof renderRaw === "function") window.renderRaw = renderRaw;
-  if(typeof rawFill === "function") window.rawFill = rawFill;
-  if(typeof issueRaw === "function") window.issueRaw = issueRaw;
-  if(typeof delRaw === "function") window.delRaw = delRaw;
-  if(typeof renderRawLog === "function") window.renderRawLog = renderRawLog;
-  if(typeof renderRawPnL === "function") window.renderRawPnL = renderRawPnL;
-  if(typeof renderDay === "function") window.renderDay = renderDay;
-  if(typeof buildPayload === "function") window.buildPayload = buildPayload;
-  if(typeof syncToSheets === "function") window.syncToSheets = syncToSheets;
-  if(typeof saveDay === "function") window.saveDay = saveDay;
-  if(typeof initMonthly === "function") window.initMonthly = initMonthly;
-  if(typeof prevMonth === "function") window.prevMonth = prevMonth;
-  if(typeof nextMonth === "function") window.nextMonth = nextMonth;
-  if(typeof showMonthDay === "function") window.showMonthDay = showMonthDay;
-  if(typeof renderMonthly === "function") window.renderMonthly = renderMonthly;
-  if(typeof renderOrders === "function") window.renderOrders = renderOrders;
-  if(typeof filterOrders === "function") window.filterOrders = filterOrders;
-  if(typeof openNewOrder === "function") window.openNewOrder = openNewOrder;
-  if(typeof closeOrderForm === "function") window.closeOrderForm = closeOrderForm;
-  if(typeof filterOrderProducts === "function") window.filterOrderProducts = filterOrderProducts;
-  if(typeof selectOrderProduct === "function") window.selectOrderProduct = selectOrderProduct;
-  if(typeof addOrderItem === "function") window.addOrderItem = addOrderItem;
-  if(typeof changeOrderItemQty === "function") window.changeOrderItemQty = changeOrderItemQty;
-  if(typeof removeOrderItem === "function") window.removeOrderItem = removeOrderItem;
-  if(typeof renderOrderItemsList === "function") window.renderOrderItemsList = renderOrderItemsList;
-  if(typeof updateOrderTotal === "function") window.updateOrderTotal = updateOrderTotal;
-  if(typeof importOrdersFromSheets === "function") window.importOrdersFromSheets = importOrdersFromSheets;
-  if(typeof saveOrder === "function") window.saveOrder = saveOrder;
-  if(typeof updateOrderStatus === "function") window.updateOrderStatus = updateOrderStatus;
-  if(typeof recordPayment === "function") window.recordPayment = recordPayment;
-  if(typeof deleteOrder === "function") window.deleteOrder = deleteOrder;
-  if(typeof renderPayments === "function") window.renderPayments = renderPayments;
-  if(typeof renderStock === "function") window.renderStock = renderStock;
-  if(typeof openStockUpdate === "function") window.openStockUpdate = openStockUpdate;
-  if(typeof closeStockForm === "function") window.closeStockForm = closeStockForm;
-  if(typeof saveStock === "function") window.saveStock = saveStock;
-  if(typeof openPurchase === "function") window.openPurchase = openPurchase;
-  if(typeof closePurchase === "function") window.closePurchase = closePurchase;
-  if(typeof savePurchase === "function") window.savePurchase = savePurchase;
-  if(typeof openRMPurchaseForm === "function") window.openRMPurchaseForm = openRMPurchaseForm;
-  if(typeof closeRMPurchaseForm === "function") window.closeRMPurchaseForm = closeRMPurchaseForm;
-  if(typeof saveRMPurchase === "function") window.saveRMPurchase = saveRMPurchase;
-  if(typeof renderRMPurchase === "function") window.renderRMPurchase = renderRMPurchase;
-  if(typeof initFGStock === "function") window.initFGStock = initFGStock;
-  if(typeof getFGBalance === "function") window.getFGBalance = getFGBalance;
-  if(typeof switchFGStage === "function") window.switchFGStage = switchFGStage;
-  if(typeof renderFGStock === "function") window.renderFGStock = renderFGStock;
-  if(typeof quickTransfer === "function") window.quickTransfer = quickTransfer;
-  if(typeof openFGTransfer === "function") window.openFGTransfer = openFGTransfer;
-  if(typeof closeFGTransfer === "function") window.closeFGTransfer = closeFGTransfer;
-  if(typeof updateFGTransferTo === "function") window.updateFGTransferTo = updateFGTransferTo;
-  if(typeof saveFGTransfer === "function") window.saveFGTransfer = saveFGTransfer;
-  if(typeof openFGAdjust === "function") window.openFGAdjust = openFGAdjust;
-  if(typeof closeFGAdjust === "function") window.closeFGAdjust = closeFGAdjust;
-  if(typeof saveFGAdjust === "function") window.saveFGAdjust = saveFGAdjust;
-  if(typeof getAllFGProducts === "function") window.getAllFGProducts = getAllFGProducts;
-  if(typeof renderInventory === "function") window.renderInventory = renderInventory;
-  if(typeof calcOT === "function") window.calcOT = calcOT;
-  if(typeof otAmt === "function") window.otAmt = otAmt;
-  if(typeof renderSalary === "function") window.renderSalary = renderSalary;
-  if(typeof openSalModal === "function") window.openSalModal = openSalModal;
-  if(typeof closeSalModal === "function") window.closeSalModal = closeSalModal;
-  if(typeof saveSalAdj === "function") window.saveSalAdj = saveSalAdj;
-  if(typeof exportSalaryExcel === "function") window.exportSalaryExcel = exportSalaryExcel;
-  if(typeof renderDispatch === "function") window.renderDispatch = renderDispatch;
-  if(typeof doDispatch === "function") window.doDispatch = doDispatch;
-  if(typeof renderBOM === "function") window.renderBOM = renderBOM;
-  if(typeof addBOMRow === "function") window.addBOMRow = addBOMRow;
-  if(typeof editBOM === "function") window.editBOM = editBOM;
-  if(typeof deleteBOM === "function") window.deleteBOM = deleteBOM;
-  if(typeof closeBOMForm === "function") window.closeBOMForm = closeBOMForm;
-  if(typeof filterBOMProducts === "function") window.filterBOMProducts = filterBOMProducts;
-  if(typeof selectBOMProd === "function") window.selectBOMProd = selectBOMProd;
-  if(typeof addBOMRM === "function") window.addBOMRM = addBOMRM;
-  if(typeof renderBOMRMRows === "function") window.renderBOMRMRows = renderBOMRMRows;
-  if(typeof saveBOM === "function") window.saveBOM = saveBOM;
-  if(typeof renderExportPage === "function") window.renderExportPage = renderExportPage;
-  if(typeof setExpRange === "function") window.setExpRange = setExpRange;
-  if(typeof getExpDates === "function") window.getExpDates = getExpDates;
-  if(typeof inRange === "function") window.inRange = inRange;
-  if(typeof checkXLSX === "function") window.checkXLSX = checkXLSX;
-  if(typeof downloadXLSX === "function") window.downloadXLSX = downloadXLSX;
-  if(typeof exportAttendance === "function") window.exportAttendance = exportAttendance;
-  if(typeof exportProduction === "function") window.exportProduction = exportProduction;
-  if(typeof exportOrders === "function") window.exportOrders = exportOrders;
-  if(typeof exportPnL === "function") window.exportPnL = exportPnL;
-  if(typeof saveDocAsOrder === "function") window.saveDocAsOrder = saveDocAsOrder;
-  if(typeof renderDocs === "function") window.renderDocs = renderDocs;
-  if(typeof updateDocType === "function") window.updateDocType = updateDocType;
-  if(typeof fillFromOrder === "function") window.fillFromOrder = fillFromOrder;
-  if(typeof docItemFill === "function") window.docItemFill = docItemFill;
-  if(typeof addDocItem === "function") window.addDocItem = addDocItem;
-  if(typeof removeDocItem === "function") window.removeDocItem = removeDocItem;
-  if(typeof renderDocItems === "function") window.renderDocItems = renderDocItems;
-  if(typeof updateDocPreview === "function") window.updateDocPreview = updateDocPreview;
-  if(typeof buildDocHTML === "function") window.buildDocHTML = buildDocHTML;
-  if(typeof printDoc === "function") window.printDoc = printDoc;
-  if(typeof clearDoc === "function") window.clearDoc = clearDoc;
-  if(typeof loadState === "function") window.loadState = loadState;
-  console.log('Factory OS ready');
-})();
+// The window-export block that lived here is gone.
+//
+// It published ~180 functions onto the global object for one reason: the
+// markup wired its buttons with inline onclick=, and the browser evaluates
+// those against `window`. The markup now names actions instead
+// (data-click="saveOrder"), and core/actions.js resolves them through real
+// imports, so nothing needs to be global any more.
+//
+// Worth remembering: this block was written `});` instead of `})();` and so
+// never actually ran. It was invisible while app.js was a classic script,
+// because top-level declarations were global anyway.
 
 // ── BOOT CLOUD SYNC ──
 // supabase-js and supabase-db.js are loaded by index.html before this

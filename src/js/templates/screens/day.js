@@ -5,8 +5,8 @@ export default `      <div class="screen" id="sc-day">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:8px">
           <div class="page-hero" style="margin-bottom:0"><h1 id="day-title">Day <span style="color:var(--amber)">Sheet</span></h1></div>
           <div style="display:flex;gap:7px;flex-wrap:wrap">
-            <button class="btn btn-jade btn-sm" onclick="syncToSheets()">☁ Sync to Sheets</button>
-            <button class="btn btn-amber" onclick="saveDay()">💾 Save Day & Start Next</button>
+            <button class="btn btn-jade btn-sm" data-click="syncToSheets">☁ Sync to Sheets</button>
+            <button class="btn btn-amber" data-click="saveDay">💾 Save Day & Start Next</button>
           </div>
         </div>
         <div class="mrow" id="day-met"></div>

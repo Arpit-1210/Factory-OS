@@ -449,3 +449,17 @@ input[type=file]{display:none}
   .screen{display:block!important;padding:0!important}
   .card{box-shadow:none!important;break-inside:avoid}
 }
+
+/* ── Replaces inline onfocus/onblur/onmouseover handlers ──
+   These used to be `onfocus="this.style.borderColor=..."` attributes in the
+   markup. They existed only to recolour a border or highlight a row, and an
+   inline handler for that forced the function onto `window` for no reason.
+   CSS does it without JavaScript at all. */
+.card input:focus,
+.card select:focus,
+.card textarea:focus { border-color: var(--blue); outline: none; }
+
+#inv-search:focus { border-color: var(--amber); outline: none; }
+
+.dd-row { padding: 9px 12px; cursor: pointer; font-size: 12px; border-bottom: 1px solid var(--border); }
+.dd-row:hover { background: var(--surface2); }

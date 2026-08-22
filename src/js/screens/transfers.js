@@ -24,6 +24,8 @@
 import { APPS_SCRIPT_CODE } from '../core/config.js';
 import { fmt, fmtN, spBadge, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
+import { persist } from '../core/sync.js';
+import { checkXLSX, downloadXLSX } from '../core/xlsx.js';
 
 const UT_DIRECTIONS = ['Unit1→Unit2', 'Unit2→Unit1'];
 
@@ -39,7 +41,7 @@ function utCatalogue() {
  * Fill the item dropdown for the selected type, and show the stage picker only
  * for finished goods — raw material has no production stage.
  */
-function renderUTItemDD() {
+export function renderUTItemDD() {
   const type = (document.getElementById('ut-type') || {}).value || 'RM';
   const wrap = document.getElementById('ut-stage-wrap');
   if (wrap) wrap.style.display = type === 'FG' ? 'block' : 'none';
@@ -50,7 +52,7 @@ function renderUTItemDD() {
 }
 
 /** Narrow the dropdown as the user types. Empty query shows the first 20. */
-function filterUTItems() {
+export function filterUTItems() {
   const dd = document.getElementById('ut-item-dd');
   if (!dd) return;
   const q = ((document.getElementById('ut-item-search') || {}).value || '').trim().toLowerCase();
@@ -63,14 +65,14 @@ function filterUTItems() {
     return;
   }
   dd.innerHTML = matches.map(i =>
-    `<div onclick="selectUTItem('${i.name.replace(/'/g, "\\'")}','${i.unit}')" ` +
+    `<div data-click="selectUTItem" ${argsAttr(i.name, i.unit)} ` +
     'style="padding:8px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border)">' +
     `${i.name}${i.unit ? ` <span style="color:var(--text4)">(${i.unit})</span>` : ''}</div>`
   ).join('');
 }
 
 /** Chosen from the dropdown: fill the search box and default the unit. */
-function selectUTItem(name, unit) {
+export function selectUTItem(name, unit) {
   const search = document.getElementById('ut-item-search');
   const unitEl = document.getElementById('ut-unit');
   if (search) search.value = name;
@@ -79,7 +81,7 @@ function selectUTItem(name, unit) {
   if (dd) dd.innerHTML = '';
 }
 
-function saveUnitTransfer() {
+export function saveUnitTransfer() {
   const val = (id) => ((document.getElementById(id) || {}).value || '').trim();
   const item = val('ut-item-search');
   const qty = parseFloat(val('ut-qty')) || 0;
@@ -114,7 +116,7 @@ function saveUnitTransfer() {
   renderUnitTransfers();
 }
 
-function deleteUnitTransfer(id) {
+export function deleteUnitTransfer(id) {
   if (!confirm('Remove this transfer?')) return;
   S.unitTransfers = (S.unitTransfers || []).filter(t => t.id !== id);
   persist();
@@ -131,7 +133,7 @@ function utFiltered() {
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 }
 
-function renderUnitTransfers() {
+export function renderUnitTransfers() {
   const rows = utFiltered();
   const today = todayStr();
 
@@ -168,11 +170,11 @@ function renderUnitTransfers() {
       <td class="num">${fmtN(t.qty)} ${t.unit || ''}</td>
       <td class="num">${t.value ? fmt(t.value) : '—'}</td>
       <td style="font-size:11px;color:var(--text4)">${t.note || ''}</td>
-      <td><button class="btn btn-ember btn-xs" onclick="deleteUnitTransfer(${t.id})">&#10005;</button></td>
+      <td><button class="btn btn-ember btn-xs" data-click="deleteUnitTransfer" data-args="[${t.id}]">&#10005;</button></td>
     </tr>`).join('')}</tbody></table>`;
 }
 
-function exportUnitTransfers() {
+export function exportUnitTransfers() {
   if (!checkXLSX()) return;
   const rows = [['Date', 'Direction', 'Type', 'Stage', 'Item', 'Qty', 'Unit', 'Value', 'Note', 'Logged By']];
   utFiltered().forEach(t => rows.push([
@@ -185,20 +187,3 @@ function exportUnitTransfers() {
   downloadXLSX(wb, `Unit_Transfers_${todayStr()}.xlsx`);
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  renderUnitTransfers,
-  renderUTItemDD,
-  filterUTItems,
-  selectUTItem,
-  saveUnitTransfer,
-  deleteUnitTransfer,
-  exportUnitTransfers,
-});

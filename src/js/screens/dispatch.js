@@ -11,9 +11,11 @@
 
 import { fmt, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
+import { persist } from '../core/sync.js';
+import { updateOrderStatus } from './orders.js';
 
 // ════ DISPATCH MANAGER ════
-function renderDispatch(){
+export function renderDispatch(){
   // Pending/ready orders
   const readyOrders = S.orders.filter(o=>o.status==='ready'||o.status==='production');
   const pendingEl = document.getElementById('dispatch-pending-orders');
@@ -28,7 +30,7 @@ function renderDispatch(){
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
             <span style="font-size:10px;padding:2px 10px;border-radius:20px;background:${orderStatusBg(o.status)};color:${orderStatusColor(o.status)};font-family:var(--mono);font-weight:700">${o.status.toUpperCase()}</span>
-            <button class="btn btn-sm btn-jade" onclick="doDispatch('${o.id}')">🚚 Dispatch Now</button>
+            <button class="btn btn-sm btn-jade" data-click="doDispatch" data-args="[&quot;${o.id}&quot;]">🚚 Dispatch Now</button>
           </div>
         </div>
       </div>`).join('')
@@ -52,7 +54,7 @@ function renderDispatch(){
     </table></div>` : '<div style="color:var(--text4);font-size:12px;padding:8px 0">No dispatches yet.</div>';
   }
 }
-function doDispatch(ordId){
+export function doDispatch(ordId){
   const o = S.orders.find(x=>x.id===ordId);
   if(!o) return;
   const challan = prompt(`Dispatch order for ${o.customer}?\n\nEnter Challan/DC Number (or leave blank):`, 'DC-'+Date.now().toString().slice(-4));
@@ -73,15 +75,3 @@ function doDispatch(ordId){
   alert(`✓ Dispatched to ${o.customer}${challan?' — Challan: '+challan:''}`);
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  renderDispatch,
-  doDispatch,
-});

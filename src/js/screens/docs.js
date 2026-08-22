@@ -11,12 +11,14 @@
 
 import { fmt, fmtN, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
+import { sendGet } from '../core/sheets-sync.js';
+import { persist } from '../core/sync.js';
 
 // ── screen state ──
 let docItems = [];
 let docCounter = { quotation:1, invoice:1, challan:1 };
 
-function saveDocAsOrder(){
+export function saveDocAsOrder(){
   const type = document.getElementById('doc-type').value;
   const cust = document.getElementById('doc-cust').value.trim();
   const phone = document.getElementById('doc-phone').value.trim();
@@ -63,7 +65,7 @@ function saveDocAsOrder(){
 
   alert(`✓ Order created for ${cust} — ₹${total.toLocaleString('en-IN')}\n\nFind it in Orders tab.`);
 }
-function renderDocs(){
+export function renderDocs(){
   // Populate product dropdown
   const sel = document.getElementById('doc-item-prod');
   if(sel) sel.innerHTML = '<option value="">— select product —</option>' +
@@ -84,7 +86,7 @@ function renderDocs(){
   renderDocItems();
   updateDocPreview();
 }
-function updateDocType(){
+export function updateDocType(){
   const type = document.getElementById('doc-type').value;
   const validWrap = document.getElementById('doc-valid-wrap');
   validWrap.style.display = type==='quotation' ? 'block' : 'none';
@@ -93,7 +95,7 @@ function updateDocType(){
   document.getElementById('doc-number').value = prefixes[type] + '-' + today.replace(/-/g,'').slice(2) + '-' + String(docCounter[type]).padStart(3,'0');
   updateDocPreview();
 }
-function fillFromOrder(){
+export function fillFromOrder(){
   const id = document.getElementById('doc-from-order').value;
   if(!id) return;
   const o = S.orders.find(o=>o.id===id);
@@ -108,14 +110,14 @@ function fillFromOrder(){
   }
   updateDocPreview();
 }
-function docItemFill(){
+export function docItemFill(){
   const sel = document.getElementById('doc-item-prod');
   const opt = sel.options[sel.selectedIndex];
   if(opt && opt.dataset.price){
     document.getElementById('doc-item-rate').value = opt.dataset.price;
   }
 }
-function addDocItem(){
+export function addDocItem(){
   const sel = document.getElementById('doc-item-prod');
   const opt = sel.options[sel.selectedIndex];
   if(!opt||!opt.value){alert('Select a product.');return;}
@@ -130,12 +132,12 @@ function addDocItem(){
   renderDocItems();
   updateDocPreview();
 }
-function removeDocItem(id){
+export function removeDocItem(id){
   docItems = docItems.filter(i=>i.id!==id);
   renderDocItems();
   updateDocPreview();
 }
-function renderDocItems(){
+export function renderDocItems(){
   const el = document.getElementById('doc-items-list');
   if(!docItems.length){el.innerHTML='<div style="color:var(--text4);font-size:12px;margin-bottom:10px">No items added yet.</div>';return;}
   el.innerHTML=`<table class="tbl" style="margin-bottom:10px"><thead><tr><th>#</th><th>Product</th><th class="num">Qty</th><th class="num">Rate ₹</th><th class="num">Total ₹</th><th></th></tr></thead><tbody>
@@ -145,16 +147,16 @@ function renderDocItems(){
     <td class="num">${item.qty}</td>
     <td class="num">${fmtN(item.rate)}</td>
     <td class="num" style="font-weight:600">${fmtN(item.total)}</td>
-    <td><button class="btn btn-ember btn-xs" onclick="removeDocItem(${item.id})">✕</button></td>
+    <td><button class="btn btn-ember btn-xs" data-click="removeDocItem" data-args="[${item.id}]">✕</button></td>
   </tr>`).join('')}
   </tbody></table>`;
 }
-function updateDocPreview(){
+export function updateDocPreview(){
   const preview = document.getElementById('doc-preview');
   if(!preview) return;
   preview.innerHTML = buildDocHTML(false);
 }
-function buildDocHTML(forPrint){
+export function buildDocHTML(forPrint){
   const type = document.getElementById('doc-type').value;
   const num = document.getElementById('doc-number').value;
   const date = document.getElementById('doc-date').value;
@@ -276,7 +278,7 @@ function buildDocHTML(forPrint){
 
   </div>`;
 }
-function printDoc(){
+export function printDoc(){
   if(!docItems.length){alert('Add at least one item before printing.');return;}
 
   const type = document.getElementById('doc-type').value;
@@ -347,7 +349,7 @@ function printDoc(){
     }
   }, 800);
 }
-function clearDoc(){
+export function clearDoc(){
   docItems=[];
   renderDocItems();
   ['doc-cust','doc-phone','doc-city','doc-addr','doc-notes','doc-discount','doc-advance'].forEach(id=>{
@@ -358,30 +360,3 @@ function clearDoc(){
   updateDocPreview();
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  saveDocAsOrder,
-  renderDocs,
-  updateDocType,
-  fillFromOrder,
-  docItemFill,
-  addDocItem,
-  removeDocItem,
-  renderDocItems,
-  updateDocPreview,
-  buildDocHTML,
-  printDoc,
-  clearDoc,
-});
-
-// State the rest of the app reads. Re-published on each change by the
-// functions above; mirrored here so the initial value is visible too.
-window.docItems = docItems;
-window.docCounter = docCounter;

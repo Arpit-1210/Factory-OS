@@ -27,24 +27,11 @@ export let fbEnabled = false;
 
 export function setRole(role) {
   currentRole = role || null;
-  window.currentRole = currentRole;
   return currentRole;
 }
 
 export function setFbEnabled(on) {
   fbEnabled = !!on;
-  window.fbEnabled = fbEnabled;
   return fbEnabled;
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-window.currentRole = currentRole;
-window.fbEnabled = fbEnabled;
-Object.assign(window, { setRole, setFbEnabled });

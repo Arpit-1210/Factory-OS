@@ -18,14 +18,14 @@ export default `      <div class="screen" id="sc-sup">
               <div style="font-family:var(--mono);font-size:10px;color:var(--text4);margin-top:2px" id="sw-meta"></div>
             </div>
             <div style="display:flex;gap:7px">
-              <button class="btn btn-sm" onclick="exitSup()">← Back</button>
-              <button class="btn btn-jade btn-sm" onclick="saveSup()">💾 Save & Exit</button>
+              <button class="btn btn-sm" data-click="exitSup">← Back</button>
+              <button class="btn btn-jade btn-sm" data-click="saveSup">💾 Save & Exit</button>
             </div>
           </div>
           <div id="sw-overview"></div>
           <div id="sw-teamwork" style="display:none">
             <div class="card">
-              <div class="ch"><div class="ct">① Stage</div><button class="btn btn-sm" onclick="activeTeamId=null;renderSupWork()">← All Teams</button></div>
+              <div class="ch"><div class="ct">① Stage</div><button class="btn btn-sm" data-click="clearTeamSelection">← All Teams</button></div>
               <div class="tabs" id="sw-stages"></div>
             </div>
             <div class="card">
@@ -39,13 +39,13 @@ export default `      <div class="screen" id="sc-sup">
               <div class="fg fg5" style="margin-bottom:10px">
                 <div class="fld">
                   <label>Product</label>
-                  <select id="sw-prod" onchange="swFill()"><option value="">— select —</option></select>
+                  <select id="sw-prod" data-change="swFill"><option value="">— select —</option></select>
                 </div>
                 <div class="fld"><label>Quantity</label><input type="number" id="sw-qty" placeholder="0" min="0"></div>
                 <div class="fld"><label>₹/unit (auto)</label><input type="number" id="sw-price" placeholder="0"><div class="hint" id="sw-ph"></div></div>
                 <div class="fld"><label>Weight/pc kg (opt)</label><input type="number" id="sw-weight" placeholder="0.0" step="0.1" min="0"></div>
                 <div class="fld" id="sw-color-field" style="display:none"><label>🎨 Colour</label><input type="text" id="sw-color-val" placeholder="e.g. Orange..."></div>
-                <div class="fld" style="display:flex;align-items:flex-end"><button class="btn btn-amber" style="width:100%" onclick="logProd()">+ Log</button></div>
+                <div class="fld" style="display:flex;align-items:flex-end"><button class="btn btn-amber" style="width:100%" data-click="logProd">+ Log</button></div>
               </div>
               <div id="sw-transfer-badge"></div>
               <div id="sw-prod-tbl"></div>

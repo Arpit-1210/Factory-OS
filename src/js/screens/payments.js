@@ -13,7 +13,7 @@ import { isOverdue } from '../core/calc.js';
 import { fmt, fmtN } from '../core/format.js';
 import { S } from '../core/state.js';
 
-function renderPayments(){
+export function renderPayments(){
   const unpaid = S.orders.filter(o=>o.status!=='dispatched'&&(o.amount-o.advance)>0);
   const totalBalance = unpaid.reduce((a,o)=>a+(o.amount-o.advance),0);
   const overdueBalance = unpaid.filter(o=>isOverdue(o)).reduce((a,o)=>a+(o.amount-o.advance),0);
@@ -44,19 +44,8 @@ function renderPayments(){
       <td class="num">${fmtN(o.advance)}</td>
       <td class="num" style="color:#B91C1C;font-weight:600">${fmt(bal)}</td>
       <td style="font-size:11px;color:${od?'#B91C1C':'#6B7280'}">${o.requiredBy?new Date(o.requiredBy+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}):'—'}</td>
-      <td><button class="btn btn-sm btn-xs" onclick="recordPayment('${o.id}')" style="background:#FFFBEB;color:#92400E;border-color:#FDE68A">💰 Pay</button></td>
+      <td><button class="btn btn-sm btn-xs" data-click="recordPayment" data-args="[&quot;${o.id}&quot;]" style="background:#FFFBEB;color:#92400E;border-color:#FDE68A">💰 Pay</button></td>
     </tr>`;
   }).join('')}</tbody></table>`;
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  renderPayments,
-});

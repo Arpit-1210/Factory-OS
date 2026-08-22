@@ -16,7 +16,7 @@ export default `<div class="screen" id="sc-transfers">
     </div>
     <div class="fg fg2">
       <div class="fld"><label>Type</label>
-        <select id="ut-type" onchange="renderUTItemDD()">
+        <select id="ut-type" data-change="renderUTItemDD">
           <option value="RM">Raw Material (RM)</option>
           <option value="FG">Finished Goods (FG)</option>
         </select>
@@ -33,7 +33,7 @@ export default `<div class="screen" id="sc-transfers">
     <div class="fg fg2">
       <div class="fld"><label>Item</label>
         <div style="position:relative">
-          <input id="ut-item-search" placeholder="Search item..." oninput="filterUTItems()" autocomplete="off">
+          <input id="ut-item-search" placeholder="Search item..." data-input="filterUTItems" autocomplete="off">
           <div id="ut-item-dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);max-height:180px;overflow-y:auto;z-index:99;box-shadow:var(--shadow)"></div>
         </div>
       </div>
@@ -44,7 +44,7 @@ export default `<div class="screen" id="sc-transfers">
       <div class="fld"><label>Value ₹ (optional)</label><input type="number" id="ut-value" placeholder="0"></div>
     </div>
     <div class="fld" style="margin-bottom:12px"><label>Note</label><input id="ut-note" placeholder="e.g. For urgent order, painting batch"></div>
-    <button class="btn btn-amber btn-full" onclick="saveUnitTransfer()">✓ Log Transfer</button>
+    <button class="btn btn-amber btn-full" data-click="saveUnitTransfer">✓ Log Transfer</button>
   </div>
 
   <!-- Metrics -->
@@ -55,17 +55,17 @@ export default `<div class="screen" id="sc-transfers">
     <div class="ch">
       <div class="ct">Transfer Log</div>
       <div style="display:flex;gap:8px">
-        <select id="ut-filter-dir" onchange="renderUnitTransfers()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);color:var(--text2)">
+        <select id="ut-filter-dir" data-change="renderUnitTransfers" style="font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);color:var(--text2)">
           <option value="all">All Directions</option>
           <option value="Unit1→Unit2">Unit 1 → Unit 2</option>
           <option value="Unit2→Unit1">Unit 2 → Unit 1</option>
         </select>
-        <select id="ut-filter-type" onchange="renderUnitTransfers()" style="font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);color:var(--text2)">
+        <select id="ut-filter-type" data-change="renderUnitTransfers" style="font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);color:var(--text2)">
           <option value="all">All Types</option>
           <option value="RM">RM Only</option>
           <option value="FG">FG Only</option>
         </select>
-        <button class="btn btn-sm" onclick="exportUnitTransfers()">📊 Export</button>
+        <button class="btn btn-sm" data-click="exportUnitTransfers">📊 Export</button>
       </div>
     </div>
     <div id="ut-log"></div>

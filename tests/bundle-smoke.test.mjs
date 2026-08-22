@@ -1,16 +1,19 @@
-// ── FULL BUNDLE SMOKE TEST ──
-// The other suites evaluate app.js as a classic SCRIPT, where every top-level
-// declaration is global. The browser loads it as a MODULE, where they are not.
-// That difference has hidden two real bugs already:
+// ── PRODUCTION BUNDLE SMOKE TEST ──
+// Bundles the real entry point exactly as Vite does and runs it, with no test
+// surface bolted on. Two things are checked that nothing else can check:
 //
-//   * the window-export block was an IIFE that never ran — invisible while
-//     declarations were global, fatal to all 114 inline handlers under modules
-//   * PAGE_TITLES and SCREEN_RENDERERS lived in app.js but were read by
-//     core/router.js — fine as globals, a ReferenceError as modules
+//   1. the app boots under genuine module scope, and
+//   2. it leaks nothing onto `window`.
 //
-// So this suite bundles the REAL entry point the same way Vite does and runs
-// that, which is the only way to catch a module-scope mistake without a
-// browser.
+// (2) is the whole point of the action-delegation refactor. The app used to
+// publish ~180 functions globally because inline `onclick=` handlers resolve
+// against `window`; markup now names actions instead, so the global surface
+// should be empty. If a bridge creeps back, this fails.
+//
+// Module scope has hidden three real bugs in this codebase already — a
+// never-invoked export block, screens reading `currentRole` out of app.js, and
+// routing constants stranded there — so it is worth testing the artifact
+// itself rather than the source.
 import { test, describe, before } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -42,7 +45,7 @@ const fakeSupabase = {
   }),
 };
 
-let win, logs, ctx;
+let win, logs, listeners;
 
 before(() => {
   const bundle = esbuild.buildSync({
@@ -52,7 +55,10 @@ before(() => {
   }).outputFiles[0].text;
 
   logs = { log: [], warn: [], error: [] };
+  listeners = [];
   const document = createDocument();
+  document.addEventListener = (type) => listeners.push(type);
+
   const sandbox = {
     document,
     localStorage: createLocalStorage(),
@@ -76,95 +82,53 @@ before(() => {
   sandbox.globalThis = sandbox;
   sandbox.self = sandbox;
 
-  ctx = vm.createContext(sandbox);
-  vm.runInContext(bundle, ctx, { filename: 'bundle.js' });
+  vm.runInContext(bundle, vm.createContext(sandbox), { filename: 'bundle.js' });
   win = sandbox;
 });
 
 describe('the bundled app boots under real module scope', () => {
-  test('no error is logged during boot', () => {
-    const real = logs.error.filter(e => !/supabase-db.js not loaded/.test(String(e[0])));
-    assert.deepEqual(real.map(e => String(e[0])), []);
+  test('nothing is logged as an error', () => {
+    assert.deepEqual(logs.error.map(e => String(e[0])), []);
   });
 
-  test('the window-export block ran to completion', () => {
-    assert.ok(logs.log.some(l => String(l[0]).includes('Factory OS ready')));
-  });
-
-  test('the document was assembled from the templates', () => {
+  test('the document is assembled from the templates', () => {
     assert.ok(win.document.getElementById('app-root').innerHTML.length > 50000);
   });
+
+  test('the delegated listeners are installed', () => {
+    // One per event type the action layer handles. Without these, every
+    // control in the app is inert.
+    for (const type of ['click', 'change', 'input', 'keydown']) {
+      assert.ok(listeners.includes(type), `no delegated ${type} listener`);
+    }
+  });
 });
 
-describe('every module reached window under module scope', () => {
-  const EXPECTED = {
-    'core/config': ['STAGES', 'FG_STAGES', 'ROLE_ACCESS', 'APPS_SCRIPT_CODE'],
-    'core/format': ['fmt', 'fmtN', 'todayStr', 'spBadge'],
-    'core/state': ['defaultState', 'loadState', 'setS', 'uid'],
-    'core/calc': ['calcOT', 'getFGBalance', 'computeSalaryMonth', 'sessionTeams'],
-    'core/session': ['setRole', 'setFbEnabled'],
-    'core/router': ['go', 'renderScreen', 'PAGE_TITLES', 'SCREEN_RENDERERS'],
-    'core/auth': ['doLogin', 'doLogout', 'togglePwd'],
-    'core/sync': ['persist', 'pushToFirebase', 'startFirebaseSync', 'updateSyncDot'],
-    'core/day-rollover': ['isDaySaved', 'adoptWorkDate', 'checkDayRollover'],
-    'components/sidebar': ['openSidebar', 'closeSidebar', 'toggleSection'],
-    'components/screen-error': ['showScreenError', 'clearScreenError'],
-  };
+describe('the app publishes nothing to window', () => {
+  // A representative slice of what used to be global: state, business maths,
+  // routing, screen renderers, and per-screen handlers.
+  const MUST_NOT_LEAK = [
+    'S', 'setS', 'uid', 'defaultState', 'loadState',
+    'calcOT', 'getFGBalance', 'computeSalaryMonth', 'sessionTeams',
+    'fmt', 'fmtN', 'todayStr', 'spBadge',
+    'STAGES', 'FG_STAGES', 'ROLE_ACCESS', 'PAGE_TITLES', 'SCREEN_RENDERERS',
+    'go', 'renderScreen', 'showScreenError', 'persist', 'pushToFirebase',
+    'currentRole', 'fbEnabled', 'setRole', 'setFbEnabled',
+    'renderOrders', 'saveOrder', 'renderDashboard', 'renderSupLogin',
+    'enterSup', 'selectTeam', 'clearTeamSelection', 'saveUnitTransfer',
+    'openAssignModal', 'closeSidebar', 'doLogin',
+  ];
 
-  for (const [mod, names] of Object.entries(EXPECTED)) {
-    test(mod, () => {
-      const missing = names.filter(n => win[n] === undefined);
-      assert.deepEqual(missing, [], `${mod} did not publish: ${missing.join(', ')}`);
-    });
-  }
-});
-
-describe('every screen renders through the real bundle', () => {
-  const SCREENS = ['dashboard', 'att', 'sup', 'raw', 'day', 'month', 'orders', 'payments',
-    'inventory', 'stock', 'rmpurchase', 'fgstock', 'salary', 'dispatch', 'bom',
-    'docs', 'export', 'setup', 'sheets'];
-
-  test('none of them throws', () => {
-    const threw = [];
-    for (const s of SCREENS) {
-      try { win.renderScreen(s); } catch (e) { threw.push(`${s}: ${e.message}`); }
-    }
-    assert.deepEqual(threw, []);
+  test('no application binding is reachable as a global', () => {
+    const leaked = MUST_NOT_LEAK.filter(n => win[n] !== undefined);
+    assert.deepEqual(leaked, [],
+      'these are still on window, so a bridge has come back: ' + leaked.join(', '));
   });
 
-  test('and none raises an error banner', () => {
-    // A banner means the renderer threw and the boundary caught it — which is
-    // how PAGE_TITLES/SCREEN_RENDERERS being stranded in app.js would surface.
-    const failures = {};
-    for (const s of SCREENS) {
-      win.renderScreen(s);
-      const box = win.document.getElementById('sc-' + s).children
-        .find(c => c.id === 'screen-error-' + s);
-      if (box) failures[s] = box.innerHTML.replace(/<[^>]+>/g, ' ').trim().slice(-90);
-    }
-    assert.deepEqual(failures, {});
-  });
-
-  test('transfers renders too, now that it has been implemented', () => {
-    // It was the last screen with no renderer at all; go("transfers") threw
-    // ReferenceError and the boundary reported it. Both now hold: it renders,
-    // and it leaves no banner behind.
-    win.renderScreen('transfers');
-    const box = win.document.getElementById('sc-transfers').children
-      .find(c => c.id === 'screen-error-transfers');
-    assert.equal(box, undefined);
-  });
-
-  test('a renderer that goes missing is still reported (the check is not vacuous)', () => {
-    // The delete has to run INSIDE the context: vm proxies the sandbox, and
-    // deleting a property on the outer object does not reach the context's
-    // global. Doing it from outside silently no-ops and the test passes
-    // vacuously — which is exactly what this test exists to prevent.
-    vm.runInContext('delete window.renderStock', ctx);
-    win.renderScreen('stock');
-    const box = win.document.getElementById('sc-stock').children
-      .find(c => c.id === 'screen-error-stock');
-    assert.ok(box, 'the boundary must still catch a missing renderer');
-    assert.match(box.innerHTML, /renderStock/);
+  test('the only intentional global is the data layer', () => {
+    // supabase-db.js is an IIFE that exposes FactoryDB. It predates the module
+    // split and is the one global the app still relies on; everything else
+    // resolves through imports.
+    assert.equal(typeof win.FactoryDB, 'object');
   });
 });

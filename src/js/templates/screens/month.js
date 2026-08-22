@@ -5,10 +5,10 @@ export default `      <div class="screen" id="sc-month">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
           <div class="page-hero" style="margin-bottom:0"><h1>Monthly <span>Report</span></h1></div>
           <div style="display:flex;gap:7px;align-items:center">
-            <button class="btn btn-sm" onclick="prevMonth()">← Prev</button>
-            <select id="m-mon" onchange="renderMonthly()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 11px;border-radius:var(--r);font-family:var(--body)"></select>
-            <select id="m-yr" onchange="renderMonthly()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 11px;border-radius:var(--r);font-family:var(--body)"></select>
-            <button class="btn btn-sm" onclick="nextMonth()">Next →</button>
+            <button class="btn btn-sm" data-click="prevMonth">← Prev</button>
+            <select id="m-mon" data-change="renderMonthly" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 11px;border-radius:var(--r);font-family:var(--body)"></select>
+            <select id="m-yr" data-change="renderMonthly" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 11px;border-radius:var(--r);font-family:var(--body)"></select>
+            <button class="btn btn-sm" data-click="nextMonth">Next →</button>
           </div>
         </div>
         <div class="mrow" id="m-met"></div>
@@ -27,7 +27,7 @@ export default `      <div class="screen" id="sc-month">
                 <div class="ct">Day Detail</div>
                 <div id="m-day-title" style="font-size:16px;font-weight:700;color:var(--text);margin-top:4px"></div>
               </div>
-              <button class="btn btn-sm" onclick="document.getElementById('m-day-detail').style.display='none'">✕</button>
+              <button class="btn btn-sm" data-click="closeMonthDayDetail">✕</button>
             </div>
             <div id="m-day-metrics" class="mrow" style="margin-bottom:16px"></div>
             <div id="m-day-prod"></div>

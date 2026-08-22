@@ -19,6 +19,9 @@
 import { getFGBalance, isOverdue } from '../core/calc.js';
 import { fmtN, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
+import { persist } from '../core/sync.js';
+import { renderFGStock } from '../screens/fgstock.js';
+import { renderOrders } from '../screens/orders.js';
 
 let assignProduct = null;
 let assignAvailable = 0;
@@ -31,7 +34,7 @@ function ordersWanting(product) {
     .filter(o => String(o.items || '').toLowerCase().includes(needle));
 }
 
-function openAssignModal(product, available, source) {
+export function openAssignModal(product, available, source) {
   assignProduct = product;
   assignAvailable = Number(available) || 0;
 
@@ -62,7 +65,7 @@ function openAssignModal(product, available, source) {
             <div style="display:flex;gap:6px;align-items:center">
               <input type="number" min="1" max="${assignAvailable}" value="${Math.min(assignAvailable, 1)}"
                 id="asg-qty-${o.id}" style="width:90px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px">
-              <button class="btn btn-jade btn-sm" onclick="confirmAssign(${o.id})">Assign</button>
+              <button class="btn btn-jade btn-sm" data-click="confirmAssign" data-args="[${o.id}]">Assign</button>
             </div>
           </div>`;
         }).join('')
@@ -73,7 +76,7 @@ function openAssignModal(product, available, source) {
   if (modal) modal.style.display = 'flex';
 }
 
-function confirmAssign(orderId) {
+export function confirmAssign(orderId) {
   const order = (S.orders || []).find(o => o.id === orderId);
   if (!order) { alert('That order no longer exists.'); closeAssignModal(); return; }
 
@@ -104,19 +107,10 @@ function confirmAssign(orderId) {
   try { renderOrders(); } catch (e) {}
 }
 
-function closeAssignModal() {
+export function closeAssignModal() {
   const modal = document.getElementById('assign-modal');
   if (modal) modal.style.display = 'none';
   assignProduct = null;
   assignAvailable = 0;
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, { openAssignModal, confirmAssign, closeAssignModal });

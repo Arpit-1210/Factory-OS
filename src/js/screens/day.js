@@ -14,8 +14,9 @@ import { STAGES } from '../core/config.js';
 import { fmt, fmtN } from '../core/format.js';
 import { fbEnabled } from '../core/session.js';
 import { S } from '../core/state.js';
+import { sendViaImage, setSyncStatus } from '../core/sheets-sync.js';
 
-function renderDay(){
+export function renderDay(){
   const d=new Date(S.workDate+'T00:00:00');
   document.getElementById('day-title').innerHTML=d.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'}).replace(/,/,',')+'&nbsp;<span style="color:var(--amber)">'+d.getFullYear()+'</span>';
   const present=S.lab.filter(l=>l.present);
@@ -59,7 +60,7 @@ function renderDay(){
   const rmTotal=S.rawLog.reduce((a,r)=>a+r.cost,0);const rmProfit=totalGoods-rmTotal;
   document.getElementById('day-rm-pnl').innerHTML=`<div class="mrow"><div class="met m-blue"><div class="ml">Total Goods</div><div class="mv w">${fmt(totalGoods)}</div></div><div class="met m-red"><div class="ml">RM Issued</div><div class="mv r">${fmt(rmTotal)}</div></div><div class="met ${rmProfit>=0?'m-green':'m-red'}"><div class="ml">RM Supervisor Net</div><div class="mv ${rmProfit>=0?'g':'r'}">${fmt(rmProfit)}</div></div></div>`;
 }
-function buildPayload(){
+export function buildPayload(){
   const present=S.lab.filter(l=>l.present);
   const bw=present.reduce((a,l)=>a+l.wage,0);
   const ot=present.reduce((a,l)=>a+calcOT(l),0);
@@ -99,14 +100,14 @@ function buildPayload(){
     sessions:JSON.parse(JSON.stringify(S.sessions))
   };
 }
-function syncToSheets(){
+export function syncToSheets(){
   if(!S.sheetsUrl){alert('Google Sheets not connected. Go to Sheets tab.');return;}
   setSyncStatus('syncing','Syncing...');
   sendViaImage(S.sheetsUrl,buildPayload());
   setSyncStatus('ok','Synced ✓');
   setTimeout(()=>setSyncStatus('ok','Connected'),3000);
 }
-function saveDay(){
+export function saveDay(){
   const payload = buildPayload();
   const entry = {...payload, date:S.workDate, rawLog:S.rawLog.map(r=>({...r}))};
   const ei = S.ledger.findIndex(e=>e.date===S.workDate);
@@ -121,7 +122,7 @@ function saveDay(){
   const nextStr = `${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}-${String(next.getDate()).padStart(2,'0')}`;
   const nextLabel = next.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'});
 
-  const btn = document.querySelector('[onclick="saveDay()"]');
+  const btn = document.querySelector('[data-click="saveDay"]');
   if(btn){ btn.textContent='⏳ Saving...'; btn.disabled=true; }
 
   // ── PERMANENTLY MARK THIS DATE AS DONE ──
@@ -159,17 +160,3 @@ function saveDay(){
   }, 3000);
 }
 
-// ── window bridge ──
-// Two things still need these on the global object:
-//   1. ~188 inline onclick=/onchange= handlers in the markup, which resolve
-//      against `window` and nothing else;
-//   2. app.js, which has no import statements of its own yet.
-// Modules no longer rely on it — screens/ and components/ import from core/
-// directly. Removing the rest means converting the markup to
-// addEventListener, which is its own piece of work.
-Object.assign(window, {
-  renderDay,
-  buildPayload,
-  syncToSheets,
-  saveDay,
-});
