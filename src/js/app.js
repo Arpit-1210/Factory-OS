@@ -7,13 +7,8 @@
 // main.js installs it on window before this file runs.
 document.getElementById('app-root').innerHTML = window.appHtml();
 
-// Firebase loader
-function loadScript(src, cb){
-  var s = document.createElement('script');
-  s.src = src; s.onload = cb||function(){};
-  s.onerror = function(){ console.error('Script failed to load: '+src); if(cb) cb(); };
-  document.head.appendChild(s);
-}
+// loadScript() removed — it fetched the Firebase SDK, which Supabase
+// replaced. No caller remained anywhere in src/.
 
 // ── ALL APP LOGIC ──
 
@@ -33,312 +28,17 @@ function loadScript(src, cb){
 // catalogues to core/seed-data.js. They reach this file as globals via the
 // bridge in those modules; main.js imports them before app.js.
 
-
 // ════ LOGIN ════
 // currentRole lives in core/session.js; write it through setRole().
 
-function togglePwd(){
-  const i = document.getElementById('login-pwd');
-  i.type = i.type==='password' ? 'text' : 'password';
-}
 // NOTE: the email-to-role map that was here is gone. It defaulted unknown
 // addresses to 'supervisor' on the client, which meant the role was decided
 // in the browser. Roles now live in app_users and are enforced by RLS.
-
-// ── LOGIN ──
-// Email + password only. The old role-card "master password" path is GONE:
-// the passwords were empty strings (the .env values never substituted
-// because there is no build step), so selecting a role and submitting a
-// blank password granted full access to anyone with the URL.
-//
-// Role is now read from app_users and enforced by Postgres RLS. Editing
-// `currentRole` in DevTools no longer grants anything.
-async function doLogin(){
-  const email = ((document.getElementById('login-email')||{}).value||'').trim();
-  const pwd   = document.getElementById('login-pwd').value;
-  const errEl = document.getElementById('login-error');
-  const btn   = document.querySelector('.login-btn');
-  errEl.style.display='none';
-
-  if(!email || !email.includes('@')){
-    errEl.textContent='❌ Enter your email address.';
-    errEl.style.display='block';
-    return;
-  }
-  if(!pwd){
-    errEl.textContent='❌ Enter your password.';
-    errEl.style.display='block';
-    return;
-  }
-
-  if(!fbEnabled){
-    const ok = await initFirebase();
-    if(!ok){
-      errEl.textContent='❌ Cannot reach the server. Check your internet connection.';
-      errEl.style.display='block';
-      return;
-    }
-  }
-
-  const restore = btn ? btn.innerHTML : '';
-  if(btn){ btn.textContent='Signing in...'; btn.disabled=true; }
-
-  const res = await FactoryDB.signIn(email, pwd);
-
-  if(btn){ btn.innerHTML=restore; btn.disabled=false; }
-
-  if(!res.ok){
-    errEl.textContent='❌ '+(/invalid login/i.test(res.message||'')
-      ? 'Wrong email or password.'
-      : (res.message||'Login failed.'));
-    errEl.style.display='block';
-    document.getElementById('login-pwd').value='';
-    return;
-  }
-
-  setRole(res.role);
-  window.currentRole = res.role;
-  document.getElementById('login-pwd').value='';
-  onLoginSuccess((res.user.user_metadata||{}).name || email.split('@')[0]);
-}
-function onLoginSuccess(displayName){
-  // Check if user selected a past date
-  const loginDate = document.getElementById('login-work-date')?.value;
-  if(loginDate && loginDate !== todayStr()){
-    // Mark today as cleared so Firebase listener doesn't overwrite past date work
-    localStorage.setItem('_day_cleared_'+todayStr(), '1');
-    // Load that day's data from ledger if exists
-    const pastEntry = S.ledger.find(e=>e.date===loginDate);
-    if(pastEntry){
-      S.sessions = pastEntry.sessions ? JSON.parse(JSON.stringify(pastEntry.sessions)) : [];
-      S.rawLog = pastEntry.rawLog ? [...pastEntry.rawLog] : [];
-      S.lab.forEach(l=>{
-        const att = (pastEntry.attendance||[]).find(a=>a.id===l.id);
-        if(att){ l.present=att.present; l.doingOT=att.doingOT; l.otHours=att.otHours||0; }
-        else { l.present=false; l.doingOT=false; l.otHours=0; }
-      });
-    } else {
-      S.sessions=[]; S.rawLog=[];
-      S.lab.forEach(l=>{l.present=false;l.doingOT=false;l.otHours=0;});
-    }
-    S.workDate = loginDate;
-    const wd=document.getElementById('work-date');
-    if(wd) wd.value=loginDate;
-  }
-
-  document.getElementById('login-page').style.display='none';
-  document.getElementById('app-shell').style.display='flex';
-  const tags={owner:'👨‍💼 Owner',supervisor:'👷 Supervisor',rm:'🧪 RM Supervisor'};
-  const el=document.getElementById('role-tag');
-  el.textContent=(displayName?displayName+' · ':'')+tags[currentRole];
-  el.className='role-tag '+currentRole;
-  if(!loginDate || loginDate===todayStr()) checkDayRollover();
-  updateSidebarForRole();
-  // Attach realtime subscriptions now that the role is known — init runs
-  // before login with currentRole=null, so nothing was subscribed yet.
-  if(fbEnabled){
-    pullFromFirebase().then(function(){
-      // Push once immediately after the first pull.
-      //
-      // This is what seeds an empty database: pull() deliberately keeps the
-      // local catalogue when the remote one is empty (see the first-run
-      // guard in supabase-db.js), and without this push those rows would
-      // never reach Postgres — the owner would appear to be working while
-      // nothing was saved.
-      //
-      // Safe to do unconditionally: pull() has just overwritten local state
-      // with whatever the server had, so for an already-populated database
-      // this writes back what it just read.
-      return pushToFirebase();
-    }).then(function(){
-      startFirebaseSync();
-      try{renderDashboard();}catch(e){}
-      var _sid=(document.querySelector('.screen.active')||{}).id;
-      if(_sid) try{go(_sid.replace('sc-',''));}catch(e){}
-    }).catch(function(e){ console.error('initial sync:', e); });
-  }
-  renderDashboard();
-  go(ROLE_HOME[currentRole]);
-}
-async function doLogout(){
-  if(fbEnabled) await FactoryDB.signOut();
-  setRole(null);
-  window.currentRole=null;
-  document.getElementById('app-shell').style.display='none';
-  document.getElementById('login-page').style.display='flex';
-  ['owner','supervisor','rm'].forEach(x=>{
-    const el=document.getElementById('rc-'+x);
-    if(el){el.style.borderColor='';el.style.background='';}
-  });
-  // Reset past date field
-  const ldEl=document.getElementById('login-work-date');
-  if(ldEl){ ldEl.value=''; ldEl.max=todayStr(); }
-  document.getElementById('login-pwd').value='';
-}
-function updateSidebarForRole(){
-  if(!currentRole) return;
-  const allowed=ROLE_ACCESS[currentRole]||[];
-  // Show/hide section cards based on role
-  const ownerSections=['sec-owner'];
-  const supSections=['sec-supervisor'];
-  const invSections=['sec-inventory'];
-  const setSections=['sec-settings'];
-  if(currentRole==='supervisor'){
-    document.getElementById('sec-owner').style.display='none';
-    document.getElementById('sec-inventory').style.display='none';
-    document.getElementById('sec-settings').style.display='none';
-    // Auto-open supervisor section
-    openSection('sec-supervisor');
-  } else if(currentRole==='rm'){
-    document.getElementById('sec-owner').style.display='none';
-    document.getElementById('sec-supervisor').style.display='none';
-    document.getElementById('sec-settings').style.display='none';
-    openSection('sec-inventory');
-  } else {
-    // Owner sees everything - open all sections
-    openSection('sec-supervisor');
-    openSection('sec-owner');
-    openSection('sec-inventory');
-    openSection('sec-settings');
-  }
-}
-
-// ════ SIDEBAR ════
-function toggleSection(id){
-  const el=document.getElementById(id);
-  el.classList.toggle('open');
-}
-function openSection(id){
-  document.getElementById(id).classList.add('open');
-}
-let _sidebarOpenTime = 0;
-function openSidebar(){
-  _sidebarOpenTime = Date.now();
-  document.getElementById('sidebar').classList.add('open');
-  document.getElementById('sb-overlay').style.display='block';
-}
-function closeSidebar(){
-  if(Date.now()-_sidebarOpenTime < 400) return;
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('sb-overlay').style.display='none';
-}
-
-// ════ NAVIGATION ════
-const PAGE_TITLES={
-  docs:'Documents',
-  dashboard:'Dashboard',setup:'Setup Catalogue',sheets:'Google Sheets',
-  att:'Attendance',sup:'Supervisor Teams',raw:'Issue Raw Materials',
-  day:'Day Sheet',month:'Monthly Report',orders:'Orders Pipeline',
-  payments:'Payments',inventory:'Daily Inventory',
-  stock:'RM Stock',rmpurchase:'RM Purchase',fgstock:'FG Stock'
-};
-function go(name){
-  if(!currentRole){return;}
-  const allowed=ROLE_ACCESS[currentRole]||[];
-  if(!allowed.includes(name)){alert('Access denied.');return;}
-  // Hide all screens
-  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-  // Show target
-  const sc=document.getElementById('sc-'+name);
-  if(sc) sc.classList.add('active');
-  // Update page title
-  document.getElementById('page-title').textContent=PAGE_TITLES[name]||name;
-  // Update sidebar active states
-  document.querySelectorAll('.sb-item,.sb-standalone').forEach(el=>{
-    const id=el.id.replace('sn-','');
-    el.classList.toggle('active',id===name);
-  });
-  // Close mobile sidebar
-  closeSidebar();
-  if(window.innerWidth<=768) closeSidebar();
-
-  // Render the screen through the error boundary — see renderScreen().
-  renderScreen(name);
-
-  // Navigating repaints the target screen, and leaving the production screen
-  // makes a pending-update badge meaningless — either way it is now seen.
-  try{ markProdSeen(); }catch(e){}
-}
-
-// ── SCREEN RENDER DISPATCH + ERROR BOUNDARY ──
-// Every screen renders through here so that a render failure is VISIBLE.
-//
-// This used to be twenty bare `if(name==='x') renderX();` lines. One throw
-// killed the rest of go() and left the screen blank, with nothing in the UI
-// to say why. Three real bugs hid behind that: renderSupLogin and
-// renderRawPnL crashed on the current session shape, and renderUnitTransfers
-// has never existed at all. The Raw Material blank screen was reported as
-// "production sync is not connected to the backend" — the wrong subsystem
-// entirely, because a dead screen and a dead sync look identical.
-//
-// Renderers are referenced lazily by name rather than captured in a map, so a
-// missing one surfaces here as a caught error instead of a ReferenceError at
-// load time.
-const SCREEN_RENDERERS = {
-  setup:'renderSetup',        sheets:'renderSheets',    att:'renderAtt',
-  sup:'renderSupLogin',       raw:'renderRaw',          day:'renderDay',
-  month:'initMonthly',        orders:'renderOrders',    payments:'renderPayments',
-  dispatch:'renderDispatch',  transfers:'renderUnitTransfers',
-  salary:'renderSalary',      export:'renderExportPage', bom:'renderBOM',
-  inventory:'renderInventory',stock:'renderStock',      rmpurchase:'renderRMPurchase',
-  fgstock:'renderFGStock',    dashboard:'renderDashboard', docs:'renderDocs',
-};
-
-function renderScreen(name){
-  const fnName = SCREEN_RENDERERS[name];
-  if(!fnName) return;
-  const fn = window[fnName];
-  if(typeof fn !== 'function'){
-    showScreenError(name, new Error(fnName+'() is not defined — this screen was never implemented'));
-    return;
-  }
-  try{
-    clearScreenError(name);
-    fn();
-  }catch(err){
-    showScreenError(name, err);
-  }
-}
-
-function screenErrorEl(name){
-  return document.getElementById('screen-error-'+name);
-}
-
-function clearScreenError(name){
-  const el = screenErrorEl(name);
-  if(el) el.remove();
-}
-
-// A banner is PREPENDED rather than replacing the screen: a renderer that
-// throws half way through still leaves useful content on the page.
-function showScreenError(name, err){
-  console.error('[screen:'+name+']', err);
-  const sc = document.getElementById('sc-'+name);
-  if(!sc) return;
-  clearScreenError(name);
-  const box = document.createElement('div');
-  box.id = 'screen-error-'+name;
-  box.style.cssText =
-    'margin:12px 0;padding:14px 16px;border-radius:10px;'+
-    'border:1px solid #FCA5A5;background:#FEF2F2;color:#991B1B;'+
-    'font-size:13px;line-height:1.5';
-  box.innerHTML =
-    '<div style="font-weight:700;margin-bottom:4px">⚠ This screen failed to load</div>'+
-    '<div style="margin-bottom:6px">Your saved data is safe — this is a display fault, '+
-    'not a sync problem. Please report it with the detail below.</div>'+
-    '<code style="display:block;font-family:var(--mono);font-size:11px;'+
-    'background:rgba(0,0,0,.05);padding:6px 8px;border-radius:6px;overflow-x:auto">'+
-    String((err && err.message) || err)+'</code>';
-  sc.insertBefore(box, sc.firstChild);
-}
 
 // ════ DASHBOARD ════
 
 
 
-
-function orderStatusColor(s){return s==='pending'?'#92400E':s==='production'?'#1E40AF':s==='ready'?'#065F46':'#6B7280';}
-function orderStatusBg(s){return s==='pending'?'var(--amber-l)':s==='production'?'var(--blue-l)':s==='ready'?'var(--jade-l)':'var(--surface2)';}
 
 // ── FIREBASE ──
 // ══════════════════════════════════════════════════════════════════
@@ -357,7 +57,6 @@ function orderStatusBg(s){return s==='pending'?'var(--amber-l)':s==='production'
 // ══════════════════════════════════════════════════════════════════
 
 // fbEnabled lives in core/session.js; write it through setFbEnabled().
-let db = null;           // Supabase client; kept for legacy truthiness checks
 
 // ── TAB VISIBILITY ──
 // Background tabs drop the realtime socket. Don't flash "Offline" at the
@@ -377,136 +76,12 @@ document.addEventListener('visibilitychange', function(){
   }
 });
 
-function updateSyncDot(status){
-  const dot = document.getElementById('sync-status');
-  const txt = document.getElementById('sync-text');
-  if(dot) dot.className = 'sync-dot ' + status;
-  if(txt){
-    const pending = (typeof FactoryDB!=='undefined') ? FactoryDB.pendingWrites() : 0;
-    txt.textContent = status==='ok'      ? 'Synced'
-                    : status==='syncing' ? 'Syncing...'
-                    : pending            ? pending+' unsynced'
-                                         : 'Offline';
-  }
-}
-
-async function initFirebase(){
-  if(typeof FactoryDB === 'undefined'){
-    console.error('supabase-db.js not loaded');
-    updateSyncDot('err');
-    return false;
-  }
-  const ok = await FactoryDB.init();
-  setFbEnabled(ok);
-  db = ok ? FactoryDB.client() : null;
-  window.db = db;
-
-  if(!ok){ updateSyncDot('err'); return false; }
-
-  console.log('Supabase connected');
-  updateSyncDot('syncing');
-
-  window.addEventListener('online',  function(){ updateSyncDot('syncing'); FactoryDB.flushOutbox(); });
-  window.addEventListener('offline', function(){ updateSyncDot('err'); });
-
-  // Replay anything queued while offline before pulling fresh state,
-  // otherwise a pull would overwrite unsent local work.
-  await FactoryDB.flushOutbox();
-
-  if(currentRole){
-    await pullFromFirebase();
-    startFirebaseSync();
-    try{ renderHome(); renderDashboard(); }catch(e){}
-  }
-  updateSyncDot('ok');
-  return true;
-}
-
-async function pushToFirebase(){
-  if(!fbEnabled || !currentRole) return;
-  await FactoryDB.push(S, currentRole);
-}
-
-async function pullFromFirebase(){
-  if(!fbEnabled) return;
-  await FactoryDB.pull(S);
-  window.S = S;
-  try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
-}
-
-// The owner's view of supervisor sessions is now just a pull. The manual
-// merge and de-duplication this used to do is gone — sessions are rows,
-// and RLS stops one supervisor from touching another's.
-async function pullSupervisorSessions(){ return pullFromFirebase(); }
-async function pullSupervisorData(){ return pullFromFirebase(); }
-
-function startFirebaseSync(){
-  if(!fbEnabled || !currentRole) return;
-  FactoryDB.startSync(S, currentRole, function(state){
-    // Whole-state replacement goes through core/state.js so its exported
-    // binding and the window bridge stay in step.
-    setS(state);
-    try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
-    updateSyncDot('ok');
-    try{ renderDashboard(); }catch(e){}
-    // Never re-render the production ('sup') screen from a remote event:
-    // it would reset the selected team and wipe inputs mid-entry.
-    const sid = (document.querySelector('.screen.active')||{}).id;
-    if(sid && sid !== 'sc-sup'){
-      try{ go(sid.replace('sc-','')); }catch(e){}
-    }else if(sid === 'sc-sup'){
-      // The data HAS arrived and is already in S — only the paint is withheld.
-      // Silently swallowing it is what made a phone entry look like it never
-      // reached the laptop, so offer it instead of dropping it.
-      try{ if(prodFingerprint() !== _prodSeen) showProdRefresh(); }catch(e){}
-    }
-  });
-}
-
-function stopFirebaseSync(){
-  if(fbEnabled) FactoryDB.stopSync();
-}
-
 // ── "NEW DATA" BADGE FOR THE PRODUCTION SCREEN ──
 // Everywhere else a remote change simply re-renders the screen. Production
 // cannot: a repaint mid-entry resets the selected team and wipes half-typed
 // inputs. So we compare what the screen last drew against what is now in
 // state, and if they differ we show a badge that lets the user take the
 // update at a moment that suits them.
-
-
-
-
-
-
-// Daily backups are Postgres point-in-time recovery now. The old version
-// wrote the ENTIRE app state into one document per day, which was on
-// course to breach Firestore's 1 MiB limit as the ledger grew.
-function scheduleAutoBackup(){ /* no-op — Supabase handles backups */ }
-
-async function runDailyBackup(){
-  if(!fbEnabled) return;
-  await FactoryDB.saveDay(S.workDate||todayStr(), buildPayload());
-  console.log('Day snapshot saved:', S.workDate);
-}
-
-// Attendance changes push immediately rather than waiting for the 2s
-// persist() debounce, so the owner's marks reach supervisors live.
-function pushAttendanceLive(){
-  if(!fbEnabled) return;
-  pushToFirebase();
-}
-
-function persist(){
-  try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
-  // A local edit always repaints, so whatever had arrived remotely is on
-  // screen now — the "new data" badge has nothing left to offer.
-  try{ markProdSeen(); }catch(e){}
-  if(fbEnabled&&db){
-    clearTimeout(persist._fbTimer);
-    persist._fbTimer=setTimeout(pushToFirebase,2000);
-  }
-}
 
 // ── ID GENERATION ──
 // These ids are bigint PRIMARY KEYs in Postgres and the `onConflict` target
@@ -545,88 +120,6 @@ function persist(){
 
 // fmt / fmtN / todayStr moved to core/format.js.
 
-function sendGet(url, params){
-  const fullUrl = url + '?' + params;
-  // Script tag is the ONLY method that works 100% cross-origin on ALL browsers
-  // including Safari, Edge, Chrome, Firefox, and mobile — no CORS issues ever
-  const s = document.createElement('script');
-  s.src = fullUrl;
-  s.onload = function(){ try{if(s.parentNode)s.parentNode.removeChild(s);}catch(e){} };
-  s.onerror = function(){ try{if(s.parentNode)s.parentNode.removeChild(s);}catch(e){} };
-  document.head.appendChild(s);
-}
-
-function sendViaImage(url, payload){
-  // Split into small chunks — each well under URL limit
-
-  // Chunk 1: Summary row (always tiny)
-  const summary = {
-    action:'summary',
-    date: payload.date,
-    workers: payload.workersPresent,
-    goods: payload.goodsValue,
-    labour: payload.labourCost,
-    ot: payload.overtimeCost||0,
-    rm: payload.rmCost,
-    net: payload.netProfit,
-    margin: payload.margin||0
-  };
-  sendGet(url, 'action=summary&payload=' + encodeURIComponent(JSON.stringify(summary)));
-
-  // Chunk 2: Production log (one request per item)
-  (payload.productLog||[]).forEach(function(p, i){
-    setTimeout(function(){
-      const prod = {action:'prod', date:payload.date, sup:p.supName||'', stage:p.stage||'', name:p.name, qty:p.qty, uv:p.unitVal, val:p.value};
-      sendGet(url, 'action=prod&payload=' + encodeURIComponent(JSON.stringify(prod)));
-    }, i * 300);
-  });
-
-  // Chunk 3: Raw materials (one per item)
-  (payload.rawLog||[]).forEach(function(r, i){
-    setTimeout(function(){
-      const rm = {action:'rm', date:payload.date, stage:r.stage, name:r.name, qty:r.qty, unit:r.unit, up:r.unitPrice, cost:r.cost};
-      sendGet(url, 'action=rm&payload=' + encodeURIComponent(JSON.stringify(rm)));
-    }, i * 300 + 500);
-  });
-
-  // Attendance: NOT synced daily — monthly salary export syncs to Sheets instead
-
-  return Promise.resolve(true);
-}
-
-
-
-function setSyncStatus(s,t){
-  // Called during init before DOM may be ready — guard silently
-  try{ updateSyncDot(s==='ok'?'ok':s==='err'?'err':'syncing'); }catch(e){}
-}
-
-function updateSyncStatus(){ S.sheetsUrl?setSyncStatus('ok','Connected'):setSyncStatus('','Not connected'); }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // ── SESSION SHAPE — read every session through these ──
 // Sessions have carried teams[] since the multi-team rework. enterSup()
 // migrates a legacy single-team session when it is OPENED, but screens also
@@ -636,88 +129,12 @@ function updateSyncStatus(){ S.sheetsUrl?setSyncStatus('ok','Connected'):setSync
 // Production screen and the whole Raw Material screen, both of which looked
 // like "the sync is broken" rather than a render crash.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // ── ORDER ITEM PICKER ──
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // NOTE: a second calcOT() used to live here. It read the legacy `worker.ot`
 // field and, being the later declaration, silently overrode the real one —
 // so every OT figure resolved to 0. The single implementation now lives with
 // the other money helpers near uid(). Do not redeclare it here.
-
 
 // ════════════════════════════════════
 // DOCUMENTS — QUOTATION / INVOICE / CHALLAN
@@ -730,65 +147,10 @@ function updateSyncStatus(){ S.sheetsUrl?setSyncStatus('ok','Connected'):setSync
 // the two can never disagree again. They previously used different OT
 // formulas and produced different payroll figures for the same month.
 
-
-
-
-
-
-
-
 // ════ BILL OF MATERIALS ════
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-function checkXLSX(){
-  if(typeof XLSX==='undefined'){alert('Excel export unavailable — check internet connection.');return false;}
-  return true;
-}
-
-function downloadXLSX(wb, filename){
-  try{
-    const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
-    const blob=new Blob([wbout],{type:'application/octet-stream'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download=filename;
-    document.body.appendChild(a); a.click();
-    setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},1000);
-  }catch(e){ XLSX.writeFile(wb,filename); }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // ── INIT ──
 // loadState() and the S binding moved to core/state.js.
-
 
 try{
   S.sheetsUrl=SHEETS_URL;
@@ -841,8 +203,6 @@ try{
   // App still works — show login
   try{ document.getElementById('login-page').style.display='flex'; }catch(e2){}
 }
-
-
 
 // ── WINDOW EXPORTS (needed for inline onclick handlers) ──
 // ── IMMEDIATE WINDOW EXPORTS (run before any onclick fires) ──
@@ -1040,7 +400,6 @@ try{
 // file, so the SDK is already present. No runtime CDN fetch needed.
 initFirebase();
 
-
 // ══════════════════════════════════════════════
 // ── FACTORY OS FIXES & ENHANCEMENTS ──
 // ══════════════════════════════════════════════
@@ -1086,58 +445,5 @@ if('serviceWorker' in navigator){
   }).catch(function(){});
 }
 
-
-// ── DAY ROLLOVER ──
-// Adopt a new work date: clear day-specific data, reset attendance
-function isDaySaved(d){
-  if(d && S.workDate && d===S.workDate){
-    // current working day can never be "already saved" — clean any stale flag from testing
-    if(localStorage.getItem('_day_cleared_'+d)) localStorage.removeItem('_day_cleared_'+d);
-    return false;
-  }
-  return !!(d && ((S.ledger||[]).some(function(e){return e.date===d;}) || localStorage.getItem('_day_cleared_'+d)));
-}
-function adoptWorkDate(newDate, savedDate){
-  if(savedDate) localStorage.setItem('_day_cleared_'+savedDate,'1');
-  // Move to the new date BEFORE filtering. isDaySaved() treats S.workDate as
-  // "the open day, never saved" and clears its _day_cleared_ flag as a side
-  // effect — so filtering first made every row still carrying the OLD date
-  // look unsaved, erased the flag marking that day closed, and carried
-  // already-saved production forward into the new day, where getFGBalance()
-  // counted it a second time on top of the ledger.
-  S.workDate=newDate;
-  // Drop only sessions from days already saved; carry unsaved in-progress work to the new date
-  S.sessions=(S.sessions||[]).filter(function(s){return !isDaySaved(s.date);});
-  S.sessions.forEach(function(s){s.date=newDate;});
-  S.rawLog=(S.rawLog||[]).filter(function(r){return !isDaySaved(r.date);});
-  S.rawLog.forEach(function(r){r.date=newDate;});
-  (S.lab||[]).forEach(function(l){l.present=false;l.doingOT=false;l.otHours=0;});
-  var wd=document.getElementById('work-date'); if(wd) wd.value=newDate;
-  try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
-  try{renderDashboard();}catch(e){}
-  var sid=(document.querySelector('.screen.active')||{}).id;
-  if(sid) try{go(sid.replace('sc-',''));}catch(e){}
-}
-// Auto-advance if our workDate is in the past AND that day was already saved
-function checkDayRollover(){
-  if(!S||!S.workDate) return;
-  // Prune leftover sessions/rawLog from days already saved (safe: they live in the ledger)
-  var pruned=false;
-  var isDone=function(d){return d && d!==S.workDate && isDaySaved(d);};
-  if((S.sessions||[]).some(function(s){return isDone(s.date);})){ S.sessions=S.sessions.filter(function(s){return !isDone(s.date);}); pruned=true; }
-  if((S.rawLog||[]).some(function(r){return isDone(r.date);})){ S.rawLog=S.rawLog.filter(function(r){return !isDone(r.date);}); pruned=true; }
-  if(pruned){
-    try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
-    try{renderDashboard();}catch(e){}
-    var _sid=(document.querySelector('.screen.active')||{}).id;
-    if(_sid) try{go(_sid.replace('sc-',''));}catch(e){}
-  }
-  var today=todayStr();
-  if(S.workDate>=today) return;
-  var wasSaved=(S.ledger||[]).some(function(e){return e.date===S.workDate;})
-    || localStorage.getItem('_day_cleared_'+S.workDate);
-  if(wasSaved) adoptWorkDate(today);
-  // If not saved: leave data alone — the day still needs to be saved manually
-}
 // Check every 60s so cleanup and overnight rollover happen without user action
 setInterval(checkDayRollover, 60*1000);
