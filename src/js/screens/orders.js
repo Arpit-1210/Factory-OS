@@ -394,8 +394,15 @@ function deleteOrder(id){
   persist(); renderOrders(); renderPayments(); renderHome();
 }
 
+
+// Status pill colours. Presentation, so they live with the screen that
+// shows them rather than in shared formatting.
+function orderStatusColor(s){return s==='pending'?'#92400E':s==='production'?'#1E40AF':s==='ready'?'#065F46':'#6B7280';}
+function orderStatusBg(s){return s==='pending'?'var(--amber-l)':s==='production'?'var(--blue-l)':s==='ready'?'var(--jade-l)':'var(--surface2)';}
+
 // ── bridge (delete once every caller imports instead) ──
 Object.assign(window, {
+  orderStatusColor, orderStatusBg,
   renderOrders,
   filterOrders,
   openNewOrder,
