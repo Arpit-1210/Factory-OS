@@ -11,6 +11,7 @@ import { LS_KEY } from './config.js';
 import { todayStr } from './format.js';
 import { go, renderScreen } from './router.js';
 import { currentRole, fbEnabled, setFbEnabled } from './session.js';
+import { restoreSession } from './auth.js';
 import { S, setS } from './state.js';
 import { renderDashboard } from '../screens/dashboard.js';
 import { buildPayload } from '../screens/day.js';
@@ -53,10 +54,18 @@ export async function initFirebase(){
   // otherwise a pull would overwrite unsent local work.
   await FactoryDB.flushOutbox();
 
-  if(currentRole){
+  // A reload arrives here with the app's currentRole still null, even when
+  // Supabase has a valid persisted session. Ask FactoryDB, which recovered it
+  // during init(), and put the user back where they were instead of showing
+  // the login page again. restoreSession() runs the normal post-login path,
+  // so it pulls and subscribes exactly as a fresh sign-in would.
+  if(!currentRole){
+    const restored = await restoreSession();
+    if(restored){ updateSyncDot('ok'); return true; }
+  } else {
     await pullFromFirebase();
     startFirebaseSync();
-    try{ renderHome(); renderDashboard(); }catch(e){}
+    try{ renderDashboard(); }catch(e){}
   }
   updateSyncDot('ok');
   return true;
