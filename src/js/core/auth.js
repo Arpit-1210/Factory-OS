@@ -160,3 +160,29 @@ export function emailKeydown(ev){
 }
 export function passwordKeydown(ev){ if (ev && ev.key === 'Enter') doLogin(); }
 
+/**
+ * Restore an already-signed-in user on page load.
+ *
+ * Supabase keeps the session in localStorage (persistSession: true) and
+ * FactoryDB.init() reads it back and resolves the role. The app never asked,
+ * though: initFirebase() checked its OWN `currentRole`, which is null on a
+ * fresh load, so a reload always dropped the user at the login screen even
+ * though the session was perfectly valid.
+ *
+ * That is what made a refresh feel like a logout — and since a refresh was the
+ * only way to see another device's changes while realtime was off, everyone
+ * was signing in again several times a day.
+ *
+ * Returns true if a session was restored.
+ */
+export async function restoreSession(){
+  if(typeof FactoryDB === 'undefined' || !FactoryDB.isReady()) return false;
+  const role = FactoryDB.role();
+  if(!role) return false;
+
+  setRole(role);
+  const user = FactoryDB.user();
+  const name = user && user.email ? user.email.split('@')[0] : '';
+  onLoginSuccess(name);
+  return true;
+}
