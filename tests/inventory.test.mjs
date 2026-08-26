@@ -177,6 +177,8 @@ describe('fg_stock rows reach getFGBalance with the right orientation', () => {
         const q = {
           select: () => q, eq: () => q, order: () => q,
           single: () => Promise.resolve({ data: null, error: { message: 'none' } }),
+        maybeSingle: () => Promise.resolve({ data: null, error: null }),
+        not() { return this; }, update() { return this; }, delete() { return this; },
           then: (res) => Promise.resolve({ data: table === 'fg_stock' ? rows : [], error: null }).then(res),
           upsert: () => Promise.resolve({ data: null, error: null }),
         };
