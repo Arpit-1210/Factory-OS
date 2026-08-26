@@ -95,6 +95,10 @@ export function boot(opts = {}) {
     supabase = undefined,   // inject a fake supabase-js global
     onLine = true,
     quiet = true,
+    // Extra globals to place in the sandbox, applied last so they win.
+    // The end-to-end run uses this to hand the app a REAL fetch, so it talks
+    // to Postgres instead of to a double.
+    globals = {},
   } = opts;
 
   const document = createDocument();
@@ -133,12 +137,17 @@ export function boot(opts = {}) {
     print: () => {},
   };
   if (supabase !== undefined) sandbox.supabase = supabase;
+  Object.assign(sandbox, globals);
 
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
   sandbox.self = sandbox;
 
   const ctx = vm.createContext(sandbox);
+
+  // index.html loads supabase-js as a classic script before the module entry.
+  // The end-to-end run passes the real UMD build here.
+  if (opts.preScript) vm.runInContext(opts.preScript, ctx, { filename: 'supabase-js.umd.js' });
 
   // Data layer first, exactly as index.html loads it.
   vm.runInContext(read('src/js/supabase-db.js'), ctx, { filename: 'supabase-db.js' });
