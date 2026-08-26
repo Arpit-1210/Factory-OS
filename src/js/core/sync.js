@@ -1,10 +1,17 @@
 // ==================================================================
 //  CORE / SYNC — Cloud sync: push, pull, realtime and the persist seam
 //
-//  Handlers are republished on `window` because the markup wires them with
-//  inline onclick=, which resolves against the global object and nothing
-//  else. Screens also still call each other as globals; those calls become
-//  imports as the remaining screens move out of app.js.
+//  Nothing here is published on `window`. The markup names actions
+//  (data-click="saveDay") and core/actions.js resolves them through real
+//  imports, so a screen reaches another screen by importing it — never
+//  through the global object.
+//
+//  This comment used to claim the opposite, and that claim outlived the
+//  refactor that made it false. It is why nineteen missing imports read as
+//  deliberate on a code review: `persist()` with no import line looked like
+//  the documented global, and was in fact a ReferenceError that aborted Save
+//  Day before it could write. tests/free-identifiers.test.mjs now fails the
+//  build on any such name.
 // ==================================================================
 
 import { LS_KEY } from './config.js';
@@ -15,7 +22,7 @@ import { restoreSession } from './auth.js';
 import { S, setS } from './state.js';
 import { renderDashboard } from '../screens/dashboard.js';
 import { buildPayload } from '../screens/day.js';
-import { markProdSeen, prodFingerprint, showProdRefresh } from '../screens/production.js';
+import { lastSeenFingerprint, markProdSeen, prodFingerprint, showProdRefresh } from '../screens/production.js';
 
 // ── screen state ──
 let db = null;           // Supabase client; kept for legacy truthiness checks
@@ -74,10 +81,14 @@ export async function pushToFirebase(){
   if(!fbEnabled || !currentRole) return;
   await FactoryDB.push(S, currentRole);
 }
+// Returns true only when every query came back clean. Callers that are about
+// to PUSH must check it: pushing after a failed pull broadcasts whatever stale
+// or half-wiped state this device happens to hold over good rows on the server.
 export async function pullFromFirebase(){
-  if(!fbEnabled) return;
+  if(!fbEnabled) return false;
   await FactoryDB.pull(S);
   try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
+  return FactoryDB.lastPullOk();
 }
 // The owner's view of supervisor sessions is now just a pull. The manual
 // merge and de-duplication this used to do is gone — sessions are rows,
@@ -102,7 +113,7 @@ export function startFirebaseSync(){
       // The data HAS arrived and is already in S — only the paint is withheld.
       // Silently swallowing it is what made a phone entry look like it never
       // reached the laptop, so offer it instead of dropping it.
-      try{ if(prodFingerprint() !== _prodSeen) showProdRefresh(); }catch(e){}
+      try{ if(prodFingerprint() !== lastSeenFingerprint()) showProdRefresh(); }catch(e){}
     }
   });
 }

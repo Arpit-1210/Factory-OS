@@ -1,10 +1,17 @@
 // ==================================================================
 //  CORE / AUTH — Sign in, sign out, and what happens after
 //
-//  Handlers are republished on `window` because the markup wires them with
-//  inline onclick=, which resolves against the global object and nothing
-//  else. Screens also still call each other as globals; those calls become
-//  imports as the remaining screens move out of app.js.
+//  Nothing here is published on `window`. The markup names actions
+//  (data-click="saveDay") and core/actions.js resolves them through real
+//  imports, so a screen reaches another screen by importing it — never
+//  through the global object.
+//
+//  This comment used to claim the opposite, and that claim outlived the
+//  refactor that made it false. It is why nineteen missing imports read as
+//  deliberate on a code review: `persist()` with no import line looked like
+//  the documented global, and was in fact a ReferenceError that aborted Save
+//  Day before it could write. tests/free-identifiers.test.mjs now fails the
+//  build on any such name.
 // ==================================================================
 
 import { updateSidebarForRole } from '../components/sidebar.js';
@@ -80,8 +87,12 @@ export function onLoginSuccess(displayName){
   // Check if user selected a past date
   const loginDate = document.getElementById('login-work-date')?.value;
   if(loginDate && loginDate !== todayStr()){
-    // Mark today as cleared so Firebase listener doesn't overwrite past date work
-    localStorage.setItem('_day_cleared_'+todayStr(), '1');
+    // NOTE: this used to also write `_day_cleared_<today>` "so the Firebase
+    // listener doesn't overwrite past date work". There is no Firebase
+    // listener any more, and every operational table is keyed by work_date, so
+    // reading a past day cannot collide with today's rows. All that flag did
+    // was make loadState() wipe today's real attendance and sessions on every
+    // reload for the rest of the calendar day.
     // Load that day's data from ledger if exists
     const pastEntry = S.ledger.find(e=>e.date===loginDate);
     if(pastEntry){
@@ -112,7 +123,7 @@ export function onLoginSuccess(displayName){
   // Attach realtime subscriptions now that the role is known — init runs
   // before login with currentRole=null, so nothing was subscribed yet.
   if(fbEnabled){
-    pullFromFirebase().then(function(){
+    pullFromFirebase().then(function(ok){
       // Push once immediately after the first pull.
       //
       // This is what seeds an empty database: pull() deliberately keeps the
@@ -121,9 +132,18 @@ export function onLoginSuccess(displayName){
       // never reach Postgres — the owner would appear to be working while
       // nothing was saved.
       //
-      // Safe to do unconditionally: pull() has just overwritten local state
-      // with whatever the server had, so for an already-populated database
-      // this writes back what it just read.
+      // ONLY when the pull actually succeeded, though. It used to be
+      // unconditional, on the reasoning that "pull() has just overwritten
+      // local state with whatever the server had". That holds only if the
+      // pull worked — and pull() swallowed its own failures, returning S
+      // untouched. So a login on a flaky connection pushed the device's local
+      // state, which loadState() may well have just cleared for a date
+      // rollover, straight over the day's real rows: everyone marked absent,
+      // for everyone, from one bad login.
+      if(!ok){
+        console.warn('initial pull failed — not pushing local state over the server');
+        return;
+      }
       return pushToFirebase();
     }).then(function(){
       startFirebaseSync();
