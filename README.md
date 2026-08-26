@@ -2,182 +2,138 @@
 **Propskart & Urban Pebbles · Ranchi, Jharkhand**
 
 ## Tech Stack
-- **Frontend:** Vite + Vanilla JS (modular)
-- **Backend:** Firebase Firestore (serverless)
-- **Auth:** Firebase Authentication
+- **Frontend:** Vite + vanilla JS, one ES module graph entered through `src/js/main.js`
+- **Backend:** Supabase (Postgres), with row level security enforcing roles
+- **Auth:** Supabase email/password; the role lives in `app_users`, not in the browser
 - **Hosting:** Vercel (auto-deploy from GitHub)
-- **Backup:** Google Sheets via Apps Script
+- **Backup:** Postgres point-in-time recovery, plus optional Google Sheets export
+
+> Earlier versions of this README described a Firebase/Firestore backend and a
+> set of `VITE_FIREBASE_*` variables. None of that exists any more — Firestore
+> was replaced by Supabase, and following those instructions configures nothing.
 
 ---
 
 ## Project Structure
 ```
 factory-os/
-├── index.html              # App shell only
+├── index.html                  # Shell; loads supabase-js + XLSX, then main.js
 ├── src/
 │   ├── js/
-│   │   ├── main.js         # Entry point
-│   │   ├── config.js       # Constants (reads from .env)
-│   │   ├── state.js        # localStorage state management
-│   │   ├── firebase.js     # Firebase sync module
-│   │   ├── auth.js         # Login + role security
-│   │   ├── router.js       # Screen navigation
-│   │   ├── sidebar.js      # Sidebar rendering
-│   │   └── utils.js        # Helper functions
-│   ├── css/
-│   │   ├── style.css       # Base styles
-│   │   └── components.css  # UI components
-│   └── screens/
-│       ├── dashboard.js    # Dashboard (3 tabs)
-│       ├── attendance.js   # Attendance + OT
-│       ├── production.js   # Teams & Production
-│       ├── orders.js       # Orders pipeline
-│       ├── inventory.js    # RM + FG inventory
-│       ├── salary.js       # Monthly payroll
-│       ├── monthly.js      # Monthly report
-│       ├── export.js       # Excel exports
-│       ├── docs.js         # Quotation/Invoice
-│       └── sheets.js       # Cloud sync settings
-├── public/
-│   └── favicon.ico
-├── .env.example            # Template (commit this)
-├── .env                    # Your secrets (NEVER commit)
-├── .gitignore
-├── vite.config.js
-└── package.json
+│   │   ├── main.js             # Entry point — imports everything, in order
+│   │   ├── supabase-db.js      # `FactoryDB`: auth, pull, push, outbox, realtime
+│   │   ├── app.js              # Boot sequence and the remaining un-split logic
+│   │   ├── core/               # config, state, session, sync, router, actions,
+│   │   │                       #   auth, calc, format, day-rollover, xlsx
+│   │   ├── screens/            # One module per screen; owns its render + handlers
+│   │   ├── templates/          # The markup for each screen
+│   │   └── components/         # sidebar, assign-modal, screen-error
+│   └── css/style.css
+├── supabase/migrations/        # Schema, RLS policies, realtime, repairs
+├── tests/                      # node --test; no install needed
+└── vite.config.js
 ```
+
+### How the UI is wired
+There is **no `window` bridge**. Markup names an action and `core/actions.js`
+resolves it through a real import:
+
+```html
+<button data-click="delRaw" data-args="[123]">✕</button>
+```
+
+A module therefore has to `import` anything it calls from another module.
+`tests/free-identifiers.test.mjs` fails the build on any name that is neither
+declared nor imported — that check exists because nineteen such names shipped
+at once, and the worst of them aborted Save Day before it could write.
 
 ---
 
-## Setup Instructions
+## Setup
 
-### 1. Clone and Install
 ```bash
-git clone https://github.com/YOUR_USERNAME/factory-os.git
-cd factory-os
+git clone <repo> && cd factory-os
 npm install
+npm run dev          # http://localhost:5173
+npm test             # 200+ tests, Node's built-in runner
+npm run build        # -> dist/
 ```
 
-### 2. Create .env file
+The Supabase URL and publishable key are in `src/js/supabase-db.js`. The
+publishable key is meant to be public; every access decision is made by row
+level security in Postgres, not by the client.
+
+`VITE_SHEETS_URL` in `src/js/core/config.js` points at the optional Google
+Apps Script backup. The Sheets screen has a copy button for the script itself.
+
+---
+
+## Database
+
+Apply the migrations in `supabase/migrations/` in order, via `supabase db push`
+or the SQL editor.
+
+| Migration | What it does |
+| --- | --- |
+| `0001_initial_schema` | Tables, RLS policies, `auth_role()`/`is_owner()`, the new-user trigger |
+| `0002_harden_function_privileges` | Revokes REST access to trigger-only functions |
+| `0003_fix_fg_stock_axis` | Un-swaps `fg_stock.product` / `fg_stock.stage` |
+| `0004_enable_realtime` | Publishes the watched tables and sets `replica identity full` |
+| `0005_repair_accounts_and_ledger_writes` | Repairs NULL token columns in `auth.users`, backfills missing `app_users` rows, lets a supervisor close their own day |
+
+### Roles
+`owner`, `supervisor`, `rm` — stored in `app_users.role`. `ROLE_ACCESS` in
+`core/config.js` decides which screens the sidebar offers; it is **navigation
+only, not a security boundary**. What a role may read and write is decided by
+the policies in `0001_initial_schema.sql`.
+
+### Adding a user
+Create the account through the Supabase dashboard's Auth section or the Auth
+Admin API — **never** with a raw `insert into auth.users`, which leaves the
+token columns NULL and makes every future sign-in fail with "Database error
+querying schema" for that account alone. The `handle_new_user` trigger then
+creates the `app_users` row at role `supervisor`; promote from there.
+
+---
+
+## Which data lives where
+
+Only data with **multiple concurrent writers** is normalised into rows;
+single-writer data stays as jsonb documents.
+
+| Contended (rows) | Single writer (jsonb in `factory_doc`) |
+| --- | --- |
+| `attendance`, `production_sessions`, `raw_log`, `fg_transfers`, `fg_stock` | orders, dispatches, salary adjustments, BOM, purchases, stock |
+
+`day_ledger` holds one row per closed day. It is written only when a day is
+closed, and — because it is the sole source for the Monthly report, monthly
+payroll, consumed-RM history and every Excel export — `pull()` will never
+replace a populated local ledger with an empty or unreadable remote one.
+
+---
+
+## Adding a new screen
+
+1. Create `src/js/screens/myscreen.js` exporting a `render` function and its handlers.
+2. Create `src/js/templates/screens/myscreen.js` for its markup, and add it to `templates/index.js`.
+3. Import the screen namespace in `core/actions.js` so its exports become actions.
+4. Register the route in `core/router.js` and add it to `ROLE_ACCESS` in `core/config.js`.
+5. Add a sidebar entry in `components/sidebar.js`.
+
+---
+
+## Tests
+
 ```bash
-cp .env.example .env
-```
-Edit `.env` with your actual values:
-```
-VITE_FIREBASE_API_KEY=AIzaSy...
-VITE_FIREBASE_AUTH_DOMAIN=frp-factory-3e933.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=frp-factory-3e933
-VITE_FIREBASE_STORAGE_BUCKET=frp-factory-3e933.firebasestorage.app
-VITE_FIREBASE_MESSAGING_SENDER_ID=842971949999
-VITE_FIREBASE_APP_ID=1:842971949999:web:0263ae517f057288341d5a
-VITE_SHEETS_URL=https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec
-VITE_OWNER_PASSWORD=YOUR_OWNER_PASSWORD
-VITE_SUPERVISOR_PASSWORD=sup@123
-VITE_RM_PASSWORD=rm@123
+npm test
+npm run test:watch
 ```
 
-### 3. Run locally
-```bash
-npm run dev
-```
-Open http://localhost:5173
+`tests/harness.mjs` bundles the real entry point and runs it in a `node:vm`
+against a small DOM stub. It also installs every module export on the sandbox's
+`window` so tests can reach internals — which is convenient and is exactly why
+`free-identifiers.test.mjs` exists as a separate, bundle-free static check: the
+harness would otherwise resolve a missing import that a browser cannot.
 
-### 4. Build for production
-```bash
-npm run build
-```
-
----
-
-## GitHub Setup
-```bash
-git init
-git add .
-git commit -m "Initial commit — Factory OS v2.0"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/factory-os.git
-git push -u origin main
-```
-
-**Important:** `.env` is in `.gitignore` — it will NOT be pushed to GitHub.
-
----
-
-## Vercel Deployment
-
-1. Go to **vercel.com** → New Project → Import from GitHub
-2. Select `factory-os` repo
-3. Framework: **Vite**
-4. Go to **Settings → Environment Variables**
-5. Add all variables from your `.env` file
-6. Deploy
-
-Every `git push` to `main` auto-deploys to Vercel.
-
----
-
-## Firebase Setup
-
-### Firestore Rules (copy to Firebase Console → Rules)
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Users can only read their own role
-    match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if false; // Only admin can set roles
-    }
-    // Factory data — authenticated users only
-    match /factory/{doc} {
-      allow read, write: if request.auth != null;
-    }
-    match /supervisors/{doc} {
-      allow read, write: if request.auth != null;
-    }
-    match /backups/{doc} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}
-```
-
-### Set User Roles in Firestore
-For each user, create a document in `users/` collection:
-```
-users/
-  {firebase_auth_uid}/
-    role: "owner"    // or "supervisor" or "rm"
-    name: "Arpit"
-    email: "arpit@propskart.com"
-```
-
----
-
-## Adding a New Screen
-
-1. Create `src/screens/myscreen.js`:
-```javascript
-export function render(container, S, role) {
-  container.innerHTML = `<div class="page-hero"><h1>My Screen</h1></div>`;
-}
-```
-
-2. Import in `src/js/main.js`:
-```javascript
-import * as MyScreen from '../screens/myscreen.js';
-const SCREENS = { myscreen: MyScreen, ... };
-```
-
-3. Add to `ROLE_ACCESS` in `src/js/config.js`
-
-4. Add sidebar link in `src/js/sidebar.js`
-
----
-
-## Security Notes
-- Secrets in `.env` → never in code
-- `.env` in `.gitignore` → never on GitHub
-- Vercel stores secrets in encrypted dashboard
-- Firebase Auth handles identity → Firestore Rules enforce data access
-- Even if someone sees the source code — they see no passwords, no API keys
+See `tests/README.md` for the suite-by-suite breakdown and the regression
+guards that must not be weakened.

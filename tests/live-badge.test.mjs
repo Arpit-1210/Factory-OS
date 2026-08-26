@@ -145,13 +145,17 @@ describe('showProdRefresh — the badge itself', () => {
     assert.equal(win.document.getElementById('prod-refresh'), first, 'must not append a second badge');
   });
 
-  test('is wired to applyProdRefresh, which is reachable from the inline handler', () => {
+  test('is wired to applyProdRefresh through the delegated action layer', () => {
     resetState(ctx, { workDate: '2026-08-19' });
     win.document.markAbsent('prod-refresh');
     call(ctx, 'showProdRefresh()');
-    assert.equal(win.document.getElementById('prod-refresh').onclick, 'applyProdRefresh()');
-    // Inline onclick resolves against window, so the export is load-bearing.
-    assert.equal(typeof win.applyProdRefresh, 'function');
+    // This used to be an inline onclick="applyProdRefresh()". Inline handlers
+    // resolve against `window`, and this app publishes nothing there any more,
+    // so the badge announced new production data and was then unclickable.
+    // data-click goes through core/actions.js, which resolves real imports.
+    const badge = win.document.getElementById('prod-refresh');
+    assert.equal(badge.getAttribute('data-click'), 'applyProdRefresh');
+    assert.equal(badge.onclick, undefined, 'must not fall back to an inline handler');
   });
 
   test('says what it is offering', () => {

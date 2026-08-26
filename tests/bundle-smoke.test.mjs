@@ -31,6 +31,8 @@ const fakeSupabase = {
       const q = {
         select: () => q, eq: () => q, order: () => q,
         single: () => Promise.resolve({ data: null, error: { message: 'none' } }),
+        maybeSingle: () => Promise.resolve({ data: null, error: null }),
+        not() { return this; }, update() { return this; }, delete() { return this; },
         then: (r) => Promise.resolve({ data: [], error: null }).then(r),
         upsert: () => Promise.resolve({ data: null, error: null }),
       };

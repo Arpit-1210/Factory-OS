@@ -21,6 +21,17 @@ function fakeSupabase({ tables = {}, failOn = [], user = null, role = 'owner' } 
         return Promise.resolve(row ? { data: row, error: null }
                                    : { data: null, error: { message: 'not found' } });
       },
+      // The real .maybeSingle() reports "no such row" as data:null with NO
+      // error — that is the whole reason fetchRole() moved onto it, so the
+      // fake has to keep the two apart too.
+      maybeSingle() {
+        const rows = tables[table] || [];
+        const row = rows.find(r => q._filters.every(([c, v]) => r[c] === v));
+        return Promise.resolve({ data: row || null, error: null });
+      },
+      not() { return q; },
+      update() { return q; },
+      delete() { return q; },
       then(res) {           // awaiting the builder runs the select
         const rows = (tables[table] || [])
           .filter(r => q._filters.every(([c, v]) => r[c] === v));

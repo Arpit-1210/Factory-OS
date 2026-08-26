@@ -3,10 +3,17 @@
 //
 //  Markup: src/js/templates/screens/production.js
 //
-//  Handlers are republished on `window` because the markup wires them with
-//  inline onclick=, which resolves against the global object and nothing
-//  else. Screens also still call each other as globals; those calls become
-//  imports as the remaining screens move out of app.js.
+//  Nothing here is published on `window`. The markup names actions
+//  (data-click="saveDay") and core/actions.js resolves them through real
+//  imports, so a screen reaches another screen by importing it — never
+//  through the global object.
+//
+//  This comment used to claim the opposite, and that claim outlived the
+//  refactor that made it false. It is why nineteen missing imports read as
+//  deliberate on a code review: `persist()` with no import line looked like
+//  the documented global, and was in fact a ReferenceError that aborted Save
+//  Day before it could write. tests/free-identifiers.test.mjs now fails the
+//  build on any such name.
 // ==================================================================
 
 import { calcOT, getFGBalance, sessionMembers, sessionProduction, sessionTeams } from '../core/calc.js';
@@ -42,7 +49,31 @@ export function renderSupLogin(){
   }
   const sups=S.lab.filter(l=>l.isSup&&l.present);
   const g=document.getElementById('sup-cards');
-  if(!sups.length){g.innerHTML='<div class="wbox">No supervisors marked present. Go to Attendance first.</div>';document.getElementById('sup-sess-list').innerHTML='';return;}
+  if(!sups.length){
+    // Say WHICH half is missing.
+    //
+    // This used to read "No supervisors marked present. Go to Attendance
+    // first." for every empty case, including the common one where the user
+    // had just finished marking attendance — so the app was telling them to go
+    // and do the thing they had already done. The screen needs a supervisor
+    // present, not merely somebody present, and until it said so the only
+    // reading available was "my attendance did not save".
+    const present = S.lab.filter(l=>l.present).length;
+    const supTotal = S.lab.filter(l=>l.isSup).length;
+    let msg;
+    if(!supTotal){
+      msg = 'No one is marked as a supervisor yet. Open <b>Setup → Workers</b> and tap the <b>SUP</b> button on the people who run the teams.';
+    } else if(!present){
+      msg = 'Nobody is marked present yet. Open <b>Attendance</b> and mark today’s workers in.';
+    } else {
+      msg = `<b>${present}</b> worker${present===1?'':'s'} marked present, but none of them is a supervisor. `+
+            `Production is started by a supervisor, so go to <b>Attendance</b> and mark one of your `+
+            `<b>${supTotal}</b> supervisors present as well.`;
+    }
+    g.innerHTML='<div class="wbox">'+msg+'</div>';
+    document.getElementById('sup-sess-list').innerHTML='';
+    return;
+  }
   g.innerHTML=sups.map(s=>{const h=!!S.sessions.find(ss=>ss.supId===s.id);return`<div class="sc ${h?'has-s':''}" data-click="enterSup" data-args="[${s.id}]"><div class="sc-ic">👷</div><div class="sc-nm">${s.name}</div><div class="sc-rl">${s.role} · ${fmt(s.wage)}/day</div><div class="sc-st" style="color:${h?'var(--jade)':'var(--fog)'}">${h?'✓ Session active':'Tap to start'}</div></div>`;}).join('');
   const sl=document.getElementById('sup-sess-list');
   if(!S.sessions.length){sl.innerHTML='<div style="color:#6B7280;font-size:12px">No active sessions yet.</div>';return;}
@@ -66,6 +97,17 @@ export function enterSup(supId){
   if(!sess){
     sess={supId,supName:sup.name,supWage:sup.wage,supOT:calcOT(sup),teams:[]};
     S.sessions.push(sess);
+    // persist() immediately, so the session reaches Postgres before any team
+    // is added to it. Without this the session lived in memory alone until the
+    // first logProd(), and any realtime event in between — most often the
+    // owner simply marking attendance on another device — replaced S.sessions
+    // from the server and deleted it. The screen is deliberately never
+    // repainted from a remote event, so the supervisor kept looking at a live
+    // team screen whose handlers had all started returning early at
+    // `if(!sess) return`: "+ Add New Team" did nothing, tapping a worker did
+    // nothing, and no error appeared anywhere. That is the reported
+    // "cannot create or assign the team".
+    persist();
   }
   // Migrate old format sessions
   if(sess.team!==undefined&&sess.teams===undefined){
@@ -439,7 +481,10 @@ export function showProdRefresh(){
   if(!b){
     b = document.createElement('div');
     b.id = 'prod-refresh';
-    b.setAttribute('onclick','applyProdRefresh()');
+    // data-click, not onclick: an inline handler resolves against `window`, and
+    // this app publishes nothing there any more, so the badge was unclickable —
+    // it announced new production data and then refused to show it.
+    b.setAttribute('data-click','applyProdRefresh');
     b.style.cssText =
       'position:fixed;left:50%;transform:translateX(-50%);'+
       'bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:9999;'+

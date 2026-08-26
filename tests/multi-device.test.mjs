@@ -39,6 +39,11 @@ function fakeSupabase({ session = null, role = null, active = true } = {}) {
           table === 'app_users' && role
             ? { data: { id: 'u1', role, name: 'Karan', active }, error: null }
             : { data: null, error: { message: 'not found' } }),
+        maybeSingle: () => Promise.resolve(
+          table === 'app_users' && role
+            ? { data: { id: 'u1', role, name: 'Karan', active }, error: null }
+            : { data: null, error: null }),
+        not: () => q, update: () => q, delete: () => q,
         then: (r) => Promise.resolve({ data: [], error: null }).then(r),
         upsert: () => Promise.resolve({ data: null, error: null }),
       };

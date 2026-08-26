@@ -1,10 +1,17 @@
 // ==================================================================
 //  CORE / ROUTER — Screen navigation and render dispatch
 //
-//  Handlers are republished on `window` because the markup wires them with
-//  inline onclick=, which resolves against the global object and nothing
-//  else. Screens also still call each other as globals; those calls become
-//  imports as the remaining screens move out of app.js.
+//  Nothing here is published on `window`. The markup names actions
+//  (data-click="saveDay") and core/actions.js resolves them through real
+//  imports, so a screen reaches another screen by importing it — never
+//  through the global object.
+//
+//  This comment used to claim the opposite, and that claim outlived the
+//  refactor that made it false. It is why nineteen missing imports read as
+//  deliberate on a code review: `persist()` with no import line looked like
+//  the documented global, and was in fact a ReferenceError that aborted Save
+//  Day before it could write. tests/free-identifiers.test.mjs now fails the
+//  build on any such name.
 // ==================================================================
 
 import { clearScreenError, showScreenError } from '../components/screen-error.js';

@@ -48,7 +48,8 @@ export function loadState() {
       merged.sheetsUrl = SHEETS_URL;
 
       const today = todayStr();
-      const thisDateCleared = localStorage.getItem('_day_cleared_' + (merged.workDate || today));
+      const staleDate = merged.workDate || today;
+      const thisDateCleared = localStorage.getItem('_day_cleared_' + staleDate);
       const lastSavedDate = localStorage.getItem('_last_saved_date');
 
       // Start a clean day if the date rolled over, the day was saved, or it
@@ -59,6 +60,28 @@ export function loadState() {
         merged.rawLog = [];
         if (merged.lab) merged.lab.forEach(l => { l.present = false; l.doingOT = false; l.otHours = 0; });
         merged.workDate = today;
+
+        // ── CONSUME THE FLAGS, DO NOT JUST READ THEM ──
+        // These two used to be write-once and never cleared, so the wipe they
+        // triggered repeated on EVERY subsequent load:
+        //
+        //   · `_day_cleared_<date>` is also written for TODAY by
+        //     onLoginSuccess() when someone signs in against a past date. One
+        //     such login poisoned the rest of the calendar day — every reload
+        //     cleared attendance and sessions before the pull could restore
+        //     them, which is what "attendance disappears after refresh" looked
+        //     like from the floor.
+        //   · `_last_saved_date` matched again the moment the line above set
+        //     workDate back to today, so after one Save Day the app re-wiped
+        //     itself on every load for the rest of the day.
+        //
+        // The day is closed now; the flags have done their job. Whether a day
+        // is saved is recorded durably in S.ledger / day_ledger, which is what
+        // day-rollover.js actually consults.
+        try {
+          localStorage.removeItem('_day_cleared_' + staleDate);
+          if (lastSavedDate === staleDate) localStorage.removeItem('_last_saved_date');
+        } catch (e) {}
       }
 
       // ── ONE-TIME MIGRATION: legacy OT field ──
