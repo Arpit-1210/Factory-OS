@@ -31,6 +31,25 @@
   var OUTBOX_KEY = '_sb_outbox';
   var flushing = false;
 
+  // Kept in the same order as the Promise.all in pull(), so a failed query can
+  // be named in the log instead of vanishing into a `|| []`.
+  var TABLES = ['workers', 'rm_catalogue', 'fg_catalogue', 'attendance',
+                'production_sessions', 'raw_log', 'fg_transfers', 'fg_stock',
+                'day_ledger', 'factory_doc'];
+
+  // The worker ids the server actually has, as of the last successful pull.
+  // null means "not known yet" — never "empty". push() uses it to avoid
+  // sending attendance rows whose foreign key cannot resolve.
+  var remoteWorkerIds = null;
+
+  // Whether the last pull() actually got clean data. pull() cannot signal
+  // failure through its return value — it returns S, and callers depend on
+  // that — but onLoginSuccess() does `pull().then(push)`, so pushing after a
+  // failed pull broadcasts whatever stale or wiped state the device happened
+  // to hold over good rows on the server. That is one of the ways a whole
+  // day's attendance turned into 161 `present: false` rows.
+  var lastPullOk = false;
+
   // ── SYNC INDICATOR ──────────────────────────────────────────────
   function dot(status) {
     var d = document.getElementById('sync-status');
@@ -61,6 +80,48 @@
     try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(q)); } catch (e) {}
   }
 
+  // ── PERMANENT vs TRANSIENT ──────────────────────────────────────
+  // The outbox exists for patchy factory wifi: park the write, replay it when
+  // the network is back. That is the right answer for a dropped connection and
+  // exactly the wrong answer for a row Postgres will NEVER accept.
+  //
+  // Both used to be treated identically. A supervisor whose write was refused
+  // by RLS (42501) or whose worker_id had no row in `workers` (23503) got the
+  // op queued, retried on every `online` event and on every Force Sync,
+  // failing every time, growing localStorage without bound — while the only
+  // signal was the sync pill reading "3 unsynced", which reads as "bad signal",
+  // not "the server rejected your data and always will".
+  //
+  // So: classify. A permanent rejection is reported once and dropped; only
+  // genuinely transient failures are worth replaying.
+  var PERMANENT = {
+    '42501': 'permission denied by the database (your role may not write this)',
+    '23503': 'refers to a record that does not exist on the server yet',
+    '23505': 'duplicate key',
+    '23514': 'failed a database check constraint',
+    '22P02': 'malformed value',
+    '42703': 'unknown column — the app and the database schema disagree',
+    '42P01': 'unknown table — a migration has not been applied'
+  };
+
+  var lastWriteError = null;
+
+  function isPermanent(err) {
+    return !!(err && err.code && PERMANENT[err.code]);
+  }
+
+  function reportPermanent(table, err) {
+    lastWriteError = {
+      table: table, code: err.code,
+      message: err.message,
+      hint: PERMANENT[err.code],
+      at: Date.now()
+    };
+    console.error('[FactoryDB] ' + table + ' PERMANENTLY rejected (' + err.code + ' — ' +
+                  PERMANENT[err.code] + '): ' + err.message +
+                  ' — dropped, not queued. Replaying it would never succeed.');
+  }
+
   async function flushOutbox() {
     if (flushing || !ready || !navigator.onLine) return;
     var q = outbox();
@@ -74,7 +135,10 @@
       var op = q[i];
       try {
         var res = await sb.from(op.table).upsert(op.rows, op.opts || {});
-        if (res.error) remaining.push(op);
+        if (res.error) {
+          if (isPermanent(res.error)) reportPermanent(op.table, res.error);
+          else remaining.push(op);
+        }
       } catch (e) {
         remaining.push(op);
       }
@@ -96,6 +160,11 @@
     try {
       var res = await sb.from(table).upsert(rows, opts || {});
       if (res.error) {
+        if (isPermanent(res.error)) {
+          reportPermanent(table, res.error);
+          dot('err');
+          return false;
+        }
         console.error('[FactoryDB] write ' + table + ':', res.error.message);
         queue({ table: table, rows: rows, opts: opts });
         return false;
@@ -103,6 +172,42 @@
       return true;
     } catch (e) {
       queue({ table: table, rows: rows, opts: opts });
+      return false;
+    }
+  }
+
+  // Delete rows the user has removed locally.
+  //
+  // push() only ever upserted, so every local delete came straight back on the
+  // next pull: removing a raw-material issue, a supervisor session, a worker or
+  // a catalogue item looked like it worked and then silently undid itself.
+  // Scoped deletes (by work date, or by explicit id list) keep the blast radius
+  // to rows the caller can actually see.
+  async function removeMissing(table, column, keep, scope) {
+    if (!ready || !navigator.onLine) return false;
+
+    // ONLY reconcile against a pull we know succeeded.
+    //
+    // "Delete every row that is not in my local list" is safe only when the
+    // local list is known to mirror the server. If the last pull failed — or
+    // never ran — this device's list can be empty for reasons that have
+    // nothing to do with anyone deleting anything (loadState() clears the day
+    // on a date rollover, for one), and an empty `keep` leaves the scope
+    // filters as the entire predicate: it would delete the whole day.
+    if (!lastPullOk) return false;
+    try {
+      var q = sb.from(table).delete();
+      if (scope) Object.keys(scope).forEach(function (k) { q = q.eq(k, scope[k]); });
+      // Postgrest needs a non-empty list for `not.in`; with nothing to keep,
+      // the scope filters alone are the whole predicate.
+      if (keep.length) q = q.not(column, 'in', '(' + keep.join(',') + ')');
+      var res = await q;
+      if (res.error) {
+        console.warn('[FactoryDB] reconcile deletes on ' + table + ':', res.error.message);
+        return false;
+      }
+      return true;
+    } catch (e) {
       return false;
     }
   }
@@ -125,7 +230,9 @@
     var sess = await sb.auth.getSession();
     if (sess.data && sess.data.session) {
       currentUser = sess.data.session.user;
-      currentRole = await fetchRole(currentUser.id);
+      var restored = await fetchRole(currentUser.id);
+      currentRole = restored.role || null;
+      if (!currentRole) console.warn('[FactoryDB] session restore:', restored.error);
     }
     return true;
   }
@@ -133,24 +240,53 @@
   // ── AUTH ────────────────────────────────────────────────────────
   // Role comes from app_users and is enforced by RLS in Postgres.
   // Editing it in DevTools now achieves nothing.
+  //
+  // WHY THIS RETURNS A REASON, NOT JUST A ROLE
+  // It used to be `.single()` plus `if (r.error || !r.data || !r.data.active)
+  // return null`, which collapsed FOUR different failures into one message —
+  // "Account is not active. Ask the owner to enable it.":
+  //
+  //   · the network was down,
+  //   · RLS refused the read (42501),
+  //   · the sign-in worked but there is NO app_users row at all (PGRST116 —
+  //     `.single()` 406s on zero rows), which is what happens to any account
+  //     created before migration 0001 added the handle_new_user trigger, or
+  //     created straight from the SQL editor,
+  //   · the row really does say active = false.
+  //
+  // Only the last one matches the text we showed. A supervisor whose row was
+  // simply never created was told to ask the owner to "enable" an account that
+  // does not exist, which is why this was reported as a database error rather
+  // than as missing setup. maybeSingle() treats zero rows as data:null instead
+  // of an error, so the four cases stay distinguishable.
   async function fetchRole(uid) {
-    var r = await sb.from('app_users').select('role,name,active').eq('id', uid).single();
-    if (r.error || !r.data || !r.data.active) return null;
-    return r.data.role;
+    var r = await sb.from('app_users').select('role,name,active').eq('id', uid).maybeSingle();
+    if (r.error) {
+      return { error: 'Could not read your account (' + (r.error.code || 'error') + '): ' +
+                      r.error.message };
+    }
+    if (!r.data) {
+      return { error: 'Your login works, but you have no factory account yet. ' +
+                      'Ask the owner to add you on the Users screen.' };
+    }
+    if (!r.data.active) {
+      return { error: 'Account is not active. Ask the owner to enable it.' };
+    }
+    return { role: r.data.role, name: r.data.name };
   }
 
   async function signIn(email, password) {
     var r = await sb.auth.signInWithPassword({ email: email, password: password });
     if (r.error) return { ok: false, message: r.error.message };
 
-    var role = await fetchRole(r.data.user.id);
-    if (!role) {
+    var res = await fetchRole(r.data.user.id);
+    if (!res.role) {
       await sb.auth.signOut();
-      return { ok: false, message: 'Account is not active. Ask the owner to enable it.' };
+      return { ok: false, message: res.error };
     }
     currentUser = r.data.user;
-    currentRole = role;
-    return { ok: true, role: role, user: currentUser };
+    currentRole = res.role;
+    return { ok: true, role: res.role, user: currentUser };
   }
 
   async function signOut() {
@@ -190,19 +326,26 @@
     return rows;
   }
 
+  // `createdBy` is carried through deliberately. sessions_read lets a
+  // supervisor SELECT every supervisor's row for the day, but
+  // sessions_sup_update only lets them UPDATE their own — so push() has to
+  // know which of the rows it just read actually belong to this user. Dropping
+  // the column here is what made push() stamp its own uid onto everyone's row.
   function sessionRowToState(r) {
     return {
-      supId:   r.sup_id,
-      supName: r.sup_name,
-      supWage: Number(r.sup_wage) || 0,
-      supOT:   Number(r.sup_ot) || 0,
-      teams:   r.teams || []
+      supId:     r.sup_id,
+      supName:   r.sup_name,
+      supWage:   Number(r.sup_wage) || 0,
+      supOT:     Number(r.sup_ot) || 0,
+      teams:     r.teams || [],
+      createdBy: r.created_by || null
     };
   }
 
   // ── PULL ────────────────────────────────────────────────────────
   async function pull(S) {
     if (!ready) return S;
+    lastPullOk = false;
     var workDate = S.workDate || new Date().toISOString().slice(0, 10);
 
     try {
@@ -219,9 +362,31 @@
         sb.from('factory_doc').select('*')
       ]);
 
+      // WHY THIS LOOP EXISTS
+      // postgrest-js never rejects: a network failure, an RLS refusal and an
+      // genuinely empty table all arrive as a resolved { data: null, error }.
+      // pull() read `res[N].data || []` and never once looked at `.error`, so
+      // a failed query was indistinguishable from an empty table — and it
+      // still called dot('ok') at the end. That is how a device could sit
+      // there reading "Synced" while showing nobody as present.
+      //
+      // factory_doc is the one expected refusal: RLS deliberately returns
+      // nothing to a supervisor for the owner-only keys, which is not an error.
+      var failed = res.map(function (r, i) {
+        if (!r.error) return null;
+        if (TABLES[i] === 'factory_doc' && currentRole !== 'owner') return null;
+        return TABLES[i] + ': ' + r.error.message;
+      }).filter(Boolean);
+
       var workers = res[0].data || [];
       var att     = {};
       (res[3].data || []).forEach(function (a) { att[a.worker_id] = a; });
+
+      // push() needs this to avoid sending attendance for a worker the
+      // `workers` table has never heard of — see the FK guard there.
+      remoteWorkerIds = workers.length
+        ? workers.reduce(function (set, w) { set[w.id] = true; return set; }, {})
+        : null;
 
       // FIRST-RUN GUARD.
       // On a fresh database every catalogue query returns []. Without this,
@@ -258,28 +423,81 @@
         return { id: r.id, name: r.name, price: Number(r.price) || 0 };
       });
 
-      S.sessions = (res[4].data || []).map(sessionRowToState);
+      // MERGE, DO NOT REPLACE.
+      // enterSup() creates a session in memory the moment a supervisor taps
+      // their card. Any realtime event — most often the owner marking
+      // attendance on another device — used to land here and replace
+      // S.sessions wholesale, deleting that not-yet-pushed session.
+      //
+      // The Production screen is deliberately never repainted from a remote
+      // event (sync.js), so the supervisor kept looking at a live team screen
+      // whose handlers had all started returning early: "+ Add New Team" did
+      // nothing, tapping a worker did nothing, with no error anywhere. That is
+      // the "cannot create or assign the team" report.
+      //
+      // logProd() already improvised a self-heal for exactly this ("if a
+      // background sync wiped the session while this screen was open, rebuild
+      // it"). Keeping the local row here fixes it for every handler at once.
+      var remoteSessions = res[4].error ? (S.sessions || [])
+                                       : (res[4].data || []).map(sessionRowToState);
+      var remoteSupIds = remoteSessions.reduce(function (set, ss) {
+        set[ss.supId] = true; return set;
+      }, {});
+      var localOnly = (S.sessions || []).filter(function (ss) {
+        return !remoteSupIds[ss.supId];
+      });
+      S.sessions = remoteSessions.concat(localOnly);
 
-      S.rawLog = (res[5].data || []).map(function (r) {
+      // Each of these is guarded on `!res[N].error` for the same reason the
+      // ledger is: postgrest resolves a failed query as { data: null, error },
+      // so `.data || []` silently turned a 500, an expired JWT or an RLS
+      // refusal into "the table is empty" — and blanked live, in-progress work
+      // on the strength of it.
+      if (!res[5].error) S.rawLog = (res[5].data || []).map(function (r) {
         return {
           id: r.id, stage: r.stage, name: r.rm_name, unit: r.unit,
           qty: Number(r.qty) || 0,
           unitPrice: Number(r.unit_price) || 0,
-          cost: Number(r.cost) || 0
+          cost: Number(r.cost) || 0,
+          loggedBy: r.logged_by || null
         };
       });
 
-      S.fgTransfers = (res[6].data || []).map(function (r) {
+      if (!res[6].error) S.fgTransfers = (res[6].data || []).map(function (r) {
         return {
           id: r.id, product: r.product, from: r.from_stage,
-          to: r.to_stage, qty: Number(r.qty) || 0
+          to: r.to_stage, qty: Number(r.qty) || 0,
+          loggedBy: r.logged_by || null
         };
       });
 
-      S.fgStock = rowsToFgStock(res[7].data);
-      S.ledger  = (res[8].data || []).map(function (r) {
-        return Object.assign({ date: r.work_date }, r.payload || {});
-      });
+      if (!res[7].error) S.fgStock = rowsToFgStock(res[7].data);
+
+      // SAME FIRST-RUN GUARD AS THE CATALOGUES, AND FOR THE SAME REASON.
+      // This used to overwrite S.ledger unconditionally. day_ledger is written
+      // by exactly one call (saveDay) and is never re-pushed, so the moment
+      // that one write failed — or the read was refused — the next pull
+      // replaced a full local month with []. Closing a day would appear to
+      // work, and the Monthly screen would be empty after the next login.
+      // An empty remote ledger never erases a populated local one.
+      if (res[8].error) {
+        console.warn('[FactoryDB] day_ledger read failed — keeping the local ledger');
+      } else {
+        var remoteLedger = (res[8].data || []).map(function (r) {
+          // work_date LAST, so it wins. It used to be first, which let a stale
+          // or differently-formatted `payload.date` override the column the
+          // row is actually keyed by — and month.js filters on that date, so
+          // such an entry is stored correctly in Postgres and invisible in the
+          // UI, with no error anywhere.
+          return Object.assign({}, r.payload || {}, { date: r.work_date });
+        });
+        if (remoteLedger.length || !(S.ledger || []).length) {
+          S.ledger = remoteLedger;
+        } else {
+          console.warn('[FactoryDB] day_ledger empty remotely — keeping ' +
+                       S.ledger.length + ' local day(s) for re-saving');
+        }
+      }
 
       // Owner-only documents. RLS returns nothing here for supervisors,
       // so guard with `!== undefined` rather than clobbering with {}.
@@ -295,7 +513,13 @@
         if (key && d.data !== undefined && d.data !== null) S[key] = d.data;
       });
 
-      dot('ok');
+      if (failed.length) {
+        console.error('[FactoryDB] pull errors:', failed);
+        dot('err');
+      } else {
+        lastPullOk = true;
+        dot(outbox().length ? 'err' : 'ok');
+      }
     } catch (e) {
       console.error('[FactoryDB] pull:', e);
       dot('err');
@@ -333,10 +557,60 @@
       await write('fg_catalogue', (S.fg || []).map(function (f) {
         return { id: f.id, name: f.name, price: Number(f.price) || 0 };
       }), { onConflict: 'id' });
+
+      // ── CATALOGUE DELETIONS ──
+      // delLab/delRM/delFG removed the item from S only, so pull() restored it
+      // on the next sync and deleting a worker looked like it silently failed.
+      //
+      // Only run when the local list is non-empty. An empty list here is far
+      // more likely to be a device that has not loaded yet than an owner who
+      // really means "remove every worker in the factory" — the same reasoning
+      // as the first-run guard in pull(), and the stakes are higher in this
+      // direction because this one destroys rows.
+      //
+      // Workers are DEACTIVATED rather than deleted: attendance.worker_id is
+      // `on delete cascade`, so a hard delete would take that worker's
+      // attendance history with it. pull() already filters on active = true.
+      if ((S.lab || []).length) {
+        var keepIds = S.lab.map(function (l) { return l.id; });
+        try {
+          var r = await sb.from('workers').update({ active: false })
+                    .not('id', 'in', '(' + keepIds.join(',') + ')').eq('active', true);
+          if (r.error) console.warn('[FactoryDB] deactivate workers:', r.error.message);
+        } catch (e) {}
+      }
+      if ((S.rm || []).length) {
+        await removeMissing('rm_catalogue', 'id', S.rm.map(function (r) { return r.id; }));
+      }
+      if ((S.fg || []).length) {
+        await removeMissing('fg_catalogue', 'id', S.fg.map(function (f) { return f.id; }));
+      }
     }
 
     if (role === 'supervisor' || role === 'owner') {
-      var attRows = (S.lab || []).map(function (l) {
+      // ── FOREIGN KEY GUARD ──
+      // attendance.worker_id references workers(id), and only the owner may
+      // write `workers`. On a database whose catalogue has never been seeded,
+      // pull()'s first-run guard deliberately KEEPS the local seed list — so a
+      // supervisor's device holds ~160 workers that Postgres has never heard
+      // of. Every one of those attendance rows fails the FK with 23503, and
+      // because it is one INSERT statement, the whole batch fails: nobody is
+      // marked present, on any device, and the only clue is the sync pill.
+      //
+      // A supervisor cannot fix that themselves, so say so plainly instead of
+      // filling the outbox with rows that can never land.
+      var lab = S.lab || [];
+      if (role !== 'owner' && remoteWorkerIds) {
+        var unknown = lab.filter(function (l) { return !remoteWorkerIds[l.id]; });
+        if (unknown.length) {
+          console.error('[FactoryDB] ' + unknown.length + ' worker(s) on this device are ' +
+                        'not in the server catalogue, so their attendance cannot be saved. ' +
+                        'The owner needs to sign in once to publish the worker list.');
+          lab = lab.filter(function (l) { return remoteWorkerIds[l.id]; });
+        }
+      }
+
+      var attRows = lab.map(function (l) {
         return {
           work_date: workDate, worker_id: l.id,
           present: !!l.present, doing_ot: !!l.doingOT,
@@ -345,14 +619,50 @@
       });
       await write('attendance', attRows, { onConflict: 'work_date,worker_id' });
 
-      var sessRows = (S.sessions || []).map(function (ss) {
+      // ── ONLY PUSH SESSIONS THIS USER MAY WRITE ──
+      // sessions_read lets a supervisor SELECT every session row for the day,
+      // so pull() hands S.sessions rows belonging to other supervisors and to
+      // the owner. This then mapped ALL of them back with `created_by: uid`,
+      // i.e. it tried to take ownership of other people's rows.
+      //
+      // sessions_sup_update requires `created_by = auth.uid()`, so those rows
+      // fail the RLS check with 42501 — and since PostgREST sends the batch as
+      // a single INSERT ... ON CONFLICT statement, the failure aborts the whole
+      // statement INCLUDING this supervisor's own row. The result: on any day
+      // where a second person already had a session, a supervisor's production
+      // never reached Postgres at all. It fired on the very first push after
+      // login, because onLoginSuccess() pulls and then immediately pushes.
+      var ownSessions = (S.sessions || []).filter(function (ss) {
+        return role === 'owner' || !ss.createdBy || ss.createdBy === uid;
+      });
+      var skipped = (S.sessions || []).length - ownSessions.length;
+      if (skipped) {
+        console.warn('[FactoryDB] not pushing ' + skipped + ' session(s) owned by ' +
+                     'another user — they are theirs to write, not ours.');
+      }
+
+      var sessRows = ownSessions.map(function (ss) {
         return {
           work_date: workDate, sup_id: ss.supId, sup_name: ss.supName,
           sup_wage: Number(ss.supWage) || 0, sup_ot: Number(ss.supOT) || 0,
-          teams: ss.teams || [], created_by: uid
+          teams: ss.teams || [], created_by: ss.createdBy || uid
         };
       });
       await write('production_sessions', sessRows, { onConflict: 'work_date,sup_id' });
+
+      // A session removed with delSess() has to be removed on the server too,
+      // or the next pull brings it straight back.
+      //
+      // Scoped to created_by for a supervisor, NOT left to RLS. RLS would in
+      // fact filter other people's rows out of the DELETE, but a delete whose
+      // safety depends on a policy elsewhere is one policy edit away from
+      // wiping the day. State the intent in the query.
+      var sessScope = { work_date: workDate };
+      if (role !== 'owner') sessScope.created_by = uid;
+      await removeMissing('production_sessions', 'sup_id',
+        ownSessions.map(function (ss) { return ss.supId; })
+                   .filter(function (id) { return typeof id === 'number'; }),
+        sessScope);
     }
 
     if (role === 'supervisor' || role === 'rm' || role === 'owner') {
@@ -361,7 +671,7 @@
           id: r.id, work_date: workDate, stage: r.stage, rm_name: r.name,
           unit: r.unit, qty: Number(r.qty) || 0,
           unit_price: Number(r.unitPrice) || 0,
-          cost: Number(r.cost) || 0, logged_by: uid
+          cost: Number(r.cost) || 0, logged_by: r.loggedBy || uid
         };
       });
       await write('raw_log', rawRows, { onConflict: 'id' });
@@ -370,11 +680,29 @@
         return {
           id: t.id, work_date: workDate, product: t.product,
           from_stage: t.from, to_stage: t.to,
-          qty: Number(t.qty) || 0, logged_by: uid
+          qty: Number(t.qty) || 0, logged_by: t.loggedBy || uid
         };
       });
       await write('fg_transfers', xferRows, { onConflict: 'id' });
       await write('fg_stock', fgStockToRows(S.fgStock), { onConflict: 'product,stage' });
+
+      // delRaw() and the transfer screens remove rows from S only. push() was
+      // upsert-only, so the row stayed in Postgres and the next pull put it
+      // straight back — a delete that undid itself a few seconds later.
+      // Scoped to the work date, so an older day's rows are never touched.
+      //
+      // Scoped to logged_by as well as the work date. raw_log and fg_transfers
+      // are multi-writer tables: without the author filter, a device that
+      // pushed before someone else's new row had reached it would read that
+      // row's absence as a deletion and remove it. A device may only retract
+      // what it wrote itself.
+      var mine = function (r) { return (r.logged_by || uid) === uid; };
+      await removeMissing('raw_log', 'id',
+        rawRows.filter(mine).map(function (r) { return r.id; }),
+        { work_date: workDate, logged_by: uid });
+      await removeMissing('fg_transfers', 'id',
+        xferRows.filter(mine).map(function (r) { return r.id; }),
+        { work_date: workDate, logged_by: uid });
     }
 
     if (role === 'owner') {
@@ -457,6 +785,8 @@
     stopSync: stopSync,
     flushOutbox: flushOutbox,
     pendingWrites: function () { return outbox().length; },
+    lastPullOk: function () { return lastPullOk; },
+    lastWriteError: function () { return lastWriteError; },
     isReady: function () { return ready; },
     role: function () { return currentRole; },
     user: function () { return currentUser; },
