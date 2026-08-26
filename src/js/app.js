@@ -11,7 +11,7 @@ import { rawFill } from './screens/raw.js';
 import { todayStr } from './core/format.js';
 import { currentRole, fbEnabled } from './core/session.js';
 import { S, uid } from './core/state.js';
-import { initFirebase, persist, pushToFirebase, updateSyncDot } from './core/sync.js';
+import { initFirebase, persist, pullFromFirebase, updateSyncDot } from './core/sync.js';
 import { appHtml } from './templates/index.js';
 import './core/actions.js';   // installs the delegated event listeners
 
@@ -85,9 +85,17 @@ document.addEventListener('visibilitychange', function(){
       if(txt) txt.textContent = 'Synced';
     }
   } else if(fbEnabled){
+    // Coming back to the tab: replay anything queued, then PULL.
+    //
+    // This used to push after 800ms with no pull first, so a phone that had
+    // been in the background — holding state from before someone else's edits
+    // — broadcast it over the server's newer rows on every app switch. A tab
+    // regaining focus has stale data by definition; it should be asking, not
+    // telling.
     updateSyncDot('syncing');
-    FactoryDB.flushOutbox();
-    setTimeout(function(){ pushToFirebase(); }, 800);
+    FactoryDB.flushOutbox().then(function(){ return pullFromFirebase(); })
+      .then(function(){ updateSyncDot('ok'); })
+      .catch(function(e){ console.warn('visibility resync:', e); });
   }
 });
 
@@ -196,22 +204,23 @@ try{
 
   // Firebase initializes after login (see doLogin)
 
-  // ── AUTO DATE REFRESH ──
-  // Check every minute if date has changed (handles midnight + timezone)
-  setInterval(()=>{
-    const newToday = todayStr();
-    if(S.workDate && S.workDate !== newToday){
-      // Date has changed — clear sessions and update
-      S.sessions = [];
-      S.rawLog = [];
-      S.lab.forEach(l=>{ l.present=false; l.doingOT=false; l.otHours=0; });
-      S.workDate = newToday;
-      const wdEl = document.getElementById('work-date');
-      if(wdEl) wdEl.value = newToday;
-      persist();
-      console.log('Date auto-updated to', newToday);
-    }
-  }, 60000); // check every 60 seconds
+  // ── AUTO DATE REFRESH — REMOVED, DELIBERATELY ──
+  //
+  // This used to be a 60s interval that, whenever S.workDate !== today,
+  // cleared S.sessions and S.rawLog, set every worker to absent, and called
+  // persist() — which pushes 2 seconds later. It destroyed data in two
+  // routine situations:
+  //
+  //   · Right after Save Day. saveDay() advances S.workDate to TOMORROW by
+  //     design, so this fired 60 seconds later, wiped the day, and pushed
+  //     `present: false` for every worker.
+  //   · At midnight on an UNSAVED day — the exact case checkDayRollover()
+  //     exists to leave alone (see day-rollover.js: "If not saved: leave data
+  //     alone — the day still needs to be saved manually"). Two rollover
+  //     mechanisms contradicted each other and the destructive one ran second.
+  //
+  // checkDayRollover() below already handles the rollover with the correct
+  // saved/unsaved semantics, on the same 60s cadence. One mechanism, not two.
 
 }catch(e){
   console.error('Init error:', e.message, e.stack);
