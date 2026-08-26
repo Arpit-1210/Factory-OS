@@ -17,12 +17,16 @@
 //  for the same reason. Counting a move as a cost would understate profit and
 //  charge for the same material twice.
 //
-//  Handlers are republished on `window` because the markup wires them with
-//  inline onclick=, which resolves against the global object and nothing else.
+//  Nothing here is published on `window`. The markup names actions
+//  (data-click="saveUnitTransfer") and core/actions.js resolves them through
+//  real imports. This file read `window.currentRole` on the strength of the
+//  claim this comment used to make; it was always undefined, so every unit
+//  transfer was logged as "owner" whoever recorded it.
 // ==================================================================
 
 import { APPS_SCRIPT_CODE } from '../core/config.js';
-import { fmt, fmtN, spBadge, todayStr } from '../core/format.js';
+import { argsAttr, fmt, fmtN, spBadge, todayStr } from '../core/format.js';
+import { currentRole } from '../core/session.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
 import { checkXLSX, downloadXLSX } from '../core/xlsx.js';
@@ -102,7 +106,7 @@ export function saveUnitTransfer() {
     unit: val('ut-unit') || '',
     value: parseFloat(val('ut-value')) || 0,
     note: val('ut-note'),
-    loggedBy: window.currentRole || 'owner',
+    loggedBy: currentRole || 'owner',
   });
 
   ['ut-item-search', 'ut-qty', 'ut-value', 'ut-note'].forEach(id => {

@@ -3,18 +3,26 @@
 //
 //  Markup: src/js/templates/screens/orders.js
 //
-//  Handlers are republished on `window` because the markup wires them with
-//  inline onclick=, which resolves against the global object and nothing
-//  else. Screens also still call each other as globals; those calls become
-//  imports as the remaining screens move out of app.js.
+//  Nothing here is published on `window`. The markup names actions
+//  (data-click="saveDay") and core/actions.js resolves them through real
+//  imports, so a screen reaches another screen by importing it — never
+//  through the global object.
+//
+//  This comment used to claim the opposite, and that claim outlived the
+//  refactor that made it false. It is why nineteen missing imports read as
+//  deliberate on a code review: `persist()` with no import line looked like
+//  the documented global, and was in fact a ReferenceError that aborted Save
+//  Day before it could write. tests/free-identifiers.test.mjs now fails the
+//  build on any such name.
 // ==================================================================
 
 import { isOverdue } from '../core/calc.js';
-import { fmt, todayStr } from '../core/format.js';
+import { argsAttr, fmt, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { sendGet } from '../core/sheets-sync.js';
 import { persist } from '../core/sync.js';
 import { renderPayments } from './payments.js';
+import { renderDashboard } from './dashboard.js';
 
 // ── screen state ──
 let orderItems = []; // [{name, qty, price}]
@@ -25,7 +33,12 @@ export function renderOrders(){
 
   // Tab active state
   document.querySelectorAll('#order-tabs .tab').forEach(t=>{
-    const f = t.onclick?.toString().match(/'(\w+)'/)?.[1];
+    // Read the filter from data-args, not from t.onclick. The tabs were
+    // migrated to data-click/data-args, so t.onclick has been null ever since
+    // — `f` was always undefined and no tab, not even "All", ever showed as
+    // selected.
+    let f;
+    try { f = JSON.parse(t.getAttribute('data-args') || '[]')[0]; } catch (e) { f = undefined; }
     t.classList.toggle('active', f===orderFilter);
   });
 
@@ -232,7 +245,7 @@ export function importOrdersFromSheets(){
     });
     persist();
     renderOrders();
-    renderHome();
+    renderDashboard();
     statusEl.textContent=added>0?`✓ ${added} order${added!==1?'s':''} imported`:'✓ All up to date';
     setTimeout(()=>statusEl.textContent='',4000);
   };
@@ -271,7 +284,7 @@ export function importOrdersFromSheets(){
               added++;
             }
           });
-          persist();renderOrders();renderHome();
+          persist();renderOrders();renderDashboard();
           statusEl.textContent=added>0?`✓ ${added} imported`:'✓ Up to date';
           setTimeout(()=>statusEl.textContent='',4000);
         })
@@ -332,7 +345,7 @@ export function saveOrder(){
   // Show confirmation with next steps
   alert(`✓ Order created!\n\nOrder ID: ${order.id}\nCustomer: ${order.customer}\n\n→ Go to Supervisor Teams to start production\n→ Check Inventory for stock reservation`);
   renderOrders();
-  renderHome();
+  renderDashboard();
 }
 export function updateOrderStatus(id, status){
   const o = S.orders.find(o=>o.id===id);
@@ -380,7 +393,7 @@ export function updateOrderStatus(id, status){
   persist();
   renderOrders();
   renderPayments();
-  renderHome();
+  renderDashboard();
 }
 export function recordPayment(id){
   const o = S.orders.find(o=>o.id===id);
@@ -392,13 +405,13 @@ Enter amount received:`));
   if(!amt||isNaN(amt)) return;
   o.advance = Math.min(o.advance + amt, o.amount);
   persist();
-  renderOrders(); renderPayments(); renderHome();
+  renderOrders(); renderPayments(); renderDashboard();
   alert(`✓ Payment of ${fmt(amt)} recorded. New balance: ${fmt(o.amount-o.advance)}`);
 }
 export function deleteOrder(id){
   if(!confirm('Delete this order?')) return;
   S.orders = S.orders.filter(o=>o.id!==id);
-  persist(); renderOrders(); renderPayments(); renderHome();
+  persist(); renderOrders(); renderPayments(); renderDashboard();
 }
 
 

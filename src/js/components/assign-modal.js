@@ -21,7 +21,7 @@ import { fmtN, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
 import { renderFGStock } from '../screens/fgstock.js';
-import { renderOrders } from '../screens/orders.js';
+import { orderStatusBg, orderStatusColor, renderOrders } from '../screens/orders.js';
 
 let assignProduct = null;
 let assignAvailable = 0;
