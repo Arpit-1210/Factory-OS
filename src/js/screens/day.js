@@ -3,17 +3,26 @@
 //
 //  Markup: src/js/templates/screens/day.js
 //
-//  Handlers are republished on `window` because the markup wires them with
-//  inline onclick=, which resolves against the global object and nothing
-//  else. Screens also still call each other as globals; those calls become
-//  imports as the remaining screens move out of app.js.
+//  Nothing here is published on `window`. The markup names actions
+//  (data-click="saveDay") and core/actions.js resolves them through real
+//  imports, so a screen reaches another screen by importing it — never
+//  through the global object.
+//
+//  This comment used to claim the opposite, and that claim outlived the
+//  refactor that made it false. It is why nineteen missing imports read as
+//  deliberate on a code review: `persist()` with no import line looked like
+//  the documented global, and was in fact a ReferenceError that aborted Save
+//  Day before it could write. tests/free-identifiers.test.mjs now fails the
+//  build on any such name.
 // ==================================================================
 
 import { calcOT } from '../core/calc.js';
 import { STAGES } from '../core/config.js';
 import { fmt, fmtN } from '../core/format.js';
+import { go } from '../core/router.js';
 import { fbEnabled } from '../core/session.js';
 import { S } from '../core/state.js';
+import { persist, pushToFirebase } from '../core/sync.js';
 import { sendViaImage, setSyncStatus } from '../core/sheets-sync.js';
 
 export function renderDay(){
@@ -107,14 +116,27 @@ export function syncToSheets(){
   setSyncStatus('ok','Synced ✓');
   setTimeout(()=>setSyncStatus('ok','Connected'),3000);
 }
-export function saveDay(){
+// ── CLOSING THE DAY ──
+//
+// The old version did all of this in the wrong order and on a fixed timer:
+// it marked the day closed in localStorage, cleared the sessions, advanced
+// the work date, and only THEN attempted the write — never awaiting it. Three
+// separate failures followed from that ordering:
+//
+//   · The success alert and the navigation ran on a 3s setTimeout, not on the
+//     result, so "✓ Day saved!" appeared whether the write succeeded, was
+//     refused by RLS, or was parked in the offline outbox.
+//   · The `_day_cleared_` flag was written BEFORE the write could fail, so a
+//     failed save still made loadState() destroy that day's sessions on the
+//     next boot — losing the shift from the device as well as from Postgres.
+//   · It called persist(), pushToFirebase() and go() without importing any of
+//     them, so it threw at the first one and never reached the write at all.
+//
+// Now: write first, and only commit to closing the day once the row is
+// actually in day_ledger.
+export async function saveDay(){
   const payload = buildPayload();
   const entry = {...payload, date:S.workDate, rawLog:S.rawLog.map(r=>({...r}))};
-  const ei = S.ledger.findIndex(e=>e.date===S.workDate);
-  if(ei>=0) S.ledger[ei]=entry; else S.ledger.push(entry);
-  S.ledger.sort((a,b)=>a.date.localeCompare(b.date));
-
-  if(S.sheetsUrl){ sendViaImage(S.sheetsUrl, payload); }
 
   const savedDate = S.workDate;
   const next = new Date(savedDate+'T00:00:00');
@@ -123,15 +145,48 @@ export function saveDay(){
   const nextLabel = next.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'});
 
   const btn = document.querySelector('[data-click="saveDay"]');
+  const restore = btn ? btn.textContent : '';
   if(btn){ btn.textContent='⏳ Saving...'; btn.disabled=true; }
 
-  // ── PERMANENTLY MARK THIS DATE AS DONE ──
-  // Multiple flags to ensure sessions never come back
+  // ── THE WRITE, BEFORE ANYTHING IS CLEARED ──
+  let saved = true;
+  if(fbEnabled){
+    try{
+      saved = await FactoryDB.saveDay(savedDate, payload);
+    }catch(e){
+      console.error('saveDay:', e);
+      saved = false;
+    }
+  }
+
+  if(fbEnabled && !saved){
+    // Nothing is cleared and no flag is written, so the day is still open and
+    // the user can try again once the cause is fixed. Say what actually
+    // happened rather than claiming success.
+    if(btn){ btn.textContent=restore; btn.disabled=false; }
+    const err = (typeof FactoryDB!=='undefined' && FactoryDB.lastWriteError)
+      ? FactoryDB.lastWriteError() : null;
+    alert(err && err.table==='day_ledger'
+      ? 'Could not close the day: '+err.hint+'.'+'\n\n'+
+        'Nothing has been cleared — the day is still open. '+
+        'Closing the day is an owner action; ask the owner to run it.'
+      : 'Could not reach the server to close the day.'+'\n\n'+
+        'Nothing has been cleared — the day is still open. '+
+        'Check the connection and press Save Day again.');
+    return false;
+  }
+
+  // The row is in day_ledger. Now it is safe to close the day locally.
+  const ei = S.ledger.findIndex(e=>e.date===savedDate);
+  if(ei>=0) S.ledger[ei]=entry; else S.ledger.push(entry);
+  S.ledger.sort((a,b)=>a.date.localeCompare(b.date));
+
+  if(S.sheetsUrl){ sendViaImage(S.sheetsUrl, payload); }
+
   localStorage.setItem('_day_cleared_'+savedDate, '1');
   localStorage.setItem('_last_saved_date', savedDate);
   localStorage.removeItem('_day_cleared_'+nextStr); // clear tomorrow's flag
 
-  // Clear sessions and rawLog immediately
   S.sessions = [];
   S.rawLog = [];
   S.lab.forEach(l=>{ l.present=false; l.doingOT=false; l.otHours=0; });
@@ -140,23 +195,16 @@ export function saveDay(){
   if(wdEl) wdEl.value = nextStr;
   persist();
 
-  // Persist the closed day as one row in `day_ledger`.
-  //
-  // Nothing needs "clearing" any more. Every operational table is keyed
-  // by work_date, so the next day simply has no rows yet — which is what
-  // made the old _dayCleared flags, the supervisor doc wipes, and the
-  // rollover broadcast unnecessary. Those three mechanisms are the source
-  // of most of the day-rollover bugs in the git history.
+  // Push the cleared state under the NEW date. Every operational table is
+  // keyed by work_date, so the next day simply has no rows yet — which is what
+  // made the old _dayCleared flags, the supervisor doc wipes and the rollover
+  // broadcast unnecessary.
   if(fbEnabled){
-    FactoryDB.saveDay(savedDate, payload)
-      .then(function(){ return pushToFirebase(); })
-      .catch(function(e){ console.warn('saveDay:', e); });
+    try{ await pushToFirebase(); }catch(e){ console.warn('saveDay push:', e); }
   }
 
-  setTimeout(()=>{
-    if(btn){ btn.textContent='💾 Save Day & Start Next'; btn.disabled=false; }
-    alert('✓ Day saved!\nNext: '+nextLabel);
-    go('att');
-  }, 3000);
+  if(btn){ btn.textContent=restore || '💾 Save Day & Start Next'; btn.disabled=false; }
+  alert('✓ Day saved!\nNext: '+nextLabel);
+  go('att');
+  return true;
 }
-
