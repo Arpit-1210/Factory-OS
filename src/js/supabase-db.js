@@ -623,14 +623,34 @@
         }
       }
 
-      var attRows = lab.map(function (l) {
+      // ── ONLY PUSH THE WORKERS THIS DEVICE ACTUALLY MARKED ──
+      // Every device used to push a row for EVERY worker, upserting on
+      // (work_date, worker_id). attendance is multi-writer — two supervisors
+      // mark their own lines — so the last device to push simply overwrote the
+      // other's marks with its own stale view: one phone that had been in a
+      // pocket since morning set the whole factory absent for the day.
+      //
+      // A device may only assert attendance for workers it has touched since
+      // its last push. Everyone else's rows are left exactly as they are. An
+      // unmarked worker has no row at all, which already means absent, so
+      // nothing is lost by staying quiet about them.
+      var touched = readDirty(workDate);
+      var attLab = lab.filter(function (l) { return touched[l.id]; });
+      var attRows = attLab.map(function (l) {
         return {
           work_date: workDate, worker_id: l.id,
           present: !!l.present, doing_ot: !!l.doingOT,
           ot_hours: Number(l.otHours) || 0, marked_by: uid
         };
       });
-      await write('attendance', attRows, { onConflict: 'work_date,worker_id' });
+      if (attRows.length) {
+        await write('attendance', attRows, { onConflict: 'work_date,worker_id' });
+        // Cleared only after the write, not on pull: a mark made between a
+        // pull and a push must not be forgotten before it has landed.
+        var left = readDirty(workDate);
+        attLab.forEach(function (l) { delete left[l.id]; });
+        writeDirty(workDate, left);
+      }
 
       // ── ONLY PUSH SESSIONS THIS USER MAY WRITE ──
       // sessions_read lets a supervisor SELECT every session row for the day,
@@ -742,6 +762,39 @@
     dot(outbox().length ? 'err' : 'ok');
   }
 
+  // ── WHOSE ATTENDANCE THIS DEVICE MAY SPEAK FOR ──
+  // Worker ids marked on this device and not yet pushed, scoped to the day
+  // they were marked on.
+  //
+  // Held in localStorage, not in a variable: a supervisor who marks the line
+  // present and then reloads (or is reloaded by the PWA) would otherwise lose
+  // the claim while the marks themselves survive in the state blob, and those
+  // marks would never reach Postgres.
+  var ATT_DIRTY_KEY = '_att_dirty';
+  function readDirty(workDate) {
+    try {
+      var raw = global.localStorage.getItem(ATT_DIRTY_KEY);
+      if (!raw) return {};
+      var box = JSON.parse(raw);
+      // Scoped to a date so yesterday's claims cannot be asserted against today.
+      if (!box || box.date !== workDate) return {};
+      return box.ids || {};
+    } catch (e) { return {}; }
+  }
+  function writeDirty(workDate, ids) {
+    try {
+      global.localStorage.setItem(ATT_DIRTY_KEY,
+        JSON.stringify({ date: workDate, ids: ids }));
+    } catch (e) {}
+  }
+  function markAttendanceDirty(id, workDate) {
+    if (id === undefined || id === null) return;
+    var d = workDate || null;
+    var ids = readDirty(d);
+    ids[id] = true;
+    writeDirty(d, ids);
+  }
+
   // ── SAVE DAY ────────────────────────────────────────────────────
   // One row per day. No 1 MiB ceiling, unlike the old ledger[] array.
   async function saveDay(workDate, payload) {
@@ -760,8 +813,12 @@
     stopSync();
     onRemoteChange = onUpdate;
 
+    // day_ledger is watched too. Without it, one device closing the day was
+    // invisible everywhere else: the other devices kept the day open, kept
+    // accepting production against it, and kept pushing rows for a day the
+    // factory had already closed and reported.
     var watch = ['attendance', 'production_sessions', 'raw_log',
-                 'fg_transfers', 'fg_stock', 'factory_doc'];
+                 'fg_transfers', 'fg_stock', 'factory_doc', 'day_ledger'];
 
     var ch = sb.channel('factory-live');
     watch.forEach(function (table) {
@@ -811,7 +868,8 @@
     role: function () { return currentRole; },
     user: function () { return currentUser; },
     client: function () { return sb; },
-    setSyncDot: dot
+    setSyncDot: dot,
+    markAttendanceDirty: markAttendanceDirty
   };
 
 })(window);

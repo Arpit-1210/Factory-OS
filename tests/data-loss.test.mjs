@@ -323,6 +323,9 @@ describe('push respects row ownership', () => {
       workDate: '2026-08-19', rm: [], fg: [], rawLog: [], fgTransfers: [], fgStock: {}, sessions: [],
       lab: [{ id: 1, name: 'R', role: 'Floor worker', wage: 600, present: true, doingOT: false, otHours: 0 }],
     };
+    // Claim the worker, as the UI does on every attendance toggle: push()
+    // only writes rows for workers this device has marked.
+    DB.markAttendanceDirty(1, S.workDate);
     await DB.push(S, 'supervisor');
 
     assert.equal(DB.pendingWrites(), 0, 'a write the server will never accept must not be queued');
@@ -483,3 +486,81 @@ describe('the old day-cleared flags are inert', () => {
   });
 });
 
+describe('attendance is not last-writer-wins across devices', () => {
+  // Every device used to push a row for EVERY worker, upserting on
+  // (work_date, worker_id). attendance is multi-writer, so whichever device
+  // pushed last overwrote the others' marks with its own view: a phone that
+  // had been in a pocket since morning set the whole factory absent.
+  const lab = (marks) => [1, 2, 3].map(id => ({
+    id, name: 'W' + id, role: 'Floor worker', wage: 400,
+    present: !!marks[id], doingOT: false, otHours: 0,
+  }));
+
+  const state = (marks) => ({
+    workDate: '2026-08-19', lab: lab(marks),
+    rm: [], fg: [], sessions: [], rawLog: [], fgTransfers: [], fgStock: {},
+  });
+
+  test('a device writes only the workers it marked', async () => {
+    const sb = fakeSupabase();
+    const h = bootDb({ supabase: sb });
+    const DB = h.win.FactoryDB;
+    await DB.init();
+
+    // This supervisor marked worker 2 only. Workers 1 and 3 are someone
+    // else's line, and this device happens to believe both are absent.
+    const S = state({ 2: true });
+    DB.markAttendanceDirty(2, S.workDate);
+    await DB.push(S, 'supervisor');
+
+    const rows = rowsFor(sb, 'attendance');
+    assert.deepEqual(rows.map(r => r.worker_id), [2],
+      'the untouched workers are left exactly as the server has them');
+    assert.equal(rows[0].present, true);
+  });
+
+  test('a device that marked nobody writes no attendance at all', async () => {
+    const sb = fakeSupabase();
+    const h = bootDb({ supabase: sb });
+    const DB = h.win.FactoryDB;
+    await DB.init();
+
+    await DB.push(state({}), 'supervisor');
+
+    assert.equal(rowsFor(sb, 'attendance').length, 0,
+      'a stale device must not assert absence for the whole factory');
+  });
+
+  test('a claim survives a reload', async () => {
+    // The claim lives in localStorage, not in a variable: a supervisor who
+    // marks the line and is then reloaded by the PWA keeps the marks in the
+    // state blob, and they must still be pushable.
+    const seed = {};
+    const first = bootDb({ supabase: fakeSupabase(), localStorageSeed: seed });
+    await first.win.FactoryDB.init();
+    first.win.FactoryDB.markAttendanceDirty(2, '2026-08-19');
+
+    // Carry this device's localStorage across the reload.
+    const carried = first.localStorage._dump();
+
+    const sb = fakeSupabase();
+    const second = bootDb({ supabase: sb, localStorageSeed: carried });
+    await second.win.FactoryDB.init();
+    await second.win.FactoryDB.push(state({ 2: true }), 'supervisor');
+
+    assert.deepEqual(rowsFor(sb, 'attendance').map(r => r.worker_id), [2]);
+  });
+
+  test('a claim does not carry to another day', async () => {
+    const sb = fakeSupabase();
+    const h = bootDb({ supabase: sb });
+    const DB = h.win.FactoryDB;
+    await DB.init();
+
+    DB.markAttendanceDirty(2, '2026-08-18');          // marked yesterday
+    await DB.push(state({ 2: true }), 'supervisor');   // pushing today
+
+    assert.equal(rowsFor(sb, 'attendance').length, 0,
+      "yesterday's claim says nothing about today");
+  });
+});

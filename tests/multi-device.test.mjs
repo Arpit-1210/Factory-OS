@@ -68,11 +68,20 @@ function fakeSupabase({ session = null, role = null, active = true } = {}) {
 
 describe('realtime is actually enabled server-side', () => {
   // The client half was never the problem; the publication was.
-  const MIGRATION = fs.readFileSync(
-    path.join(ROOT, 'supabase/migrations/0004_enable_realtime.sql'), 'utf8');
+  // EVERY migration, not one named file. Pinning 0004 meant a table published
+  // by a later migration read as unpublished — and, worse, that a table added
+  // to the client's watch list with no migration at all would only be caught
+  // if someone remembered to edit 0004 specifically.
+  const MIGRATION = fs.readdirSync(path.join(ROOT, 'supabase/migrations'))
+    .filter(f => f.endsWith('.sql'))
+    .map(f => fs.readFileSync(path.join(ROOT, 'supabase/migrations', f), 'utf8'))
+    .join('\n');
 
   const WATCHED = ['attendance', 'production_sessions', 'raw_log',
-                   'fg_transfers', 'fg_stock', 'factory_doc'];
+                   'fg_transfers', 'fg_stock', 'factory_doc',
+                   // Closing a day writes one row, to this table. Unwatched,
+                   // one device closing the day was invisible to the others.
+                   'day_ledger'];
 
   test('every table the client subscribes to is added to the publication', async () => {
     const sb = fakeSupabase();
@@ -85,7 +94,7 @@ describe('realtime is actually enabled server-side', () => {
       'the client subscribes to exactly these tables');
 
     for (const t of subscribed) {
-      assert.match(MIGRATION, new RegExp(`'${t}'`),
+      assert.match(MIGRATION, new RegExp('(^|[^a-z_])' + t + '([^a-z_]|$)'),
         `${t} is subscribed but never added to supabase_realtime — ` +
         'the channel would report SUBSCRIBED and receive nothing');
     }

@@ -75,6 +75,19 @@ const bootDB = (opts = {}) => {
   return { ...h, sb, DB: h.win.FactoryDB };
 };
 
+/**
+ * Push, having first claimed every worker's attendance for this device.
+ *
+ * push() only writes attendance rows for workers this device has marked, so
+ * that a stale device cannot overwrite another supervisor's marks. The UI
+ * claims a worker on every toggle (see `claim()` in screens/att.js); these
+ * fixtures build state directly, so they claim on the test's behalf.
+ */
+const pushClaimed = async (DB, state, role) => {
+  (state.lab || []).forEach(l => DB.markAttendanceDirty(l.id, state.workDate));
+  return DB.push(state, role);
+};
+
 const rowsFor = (sb, table) => sb._writes.filter(w => w.table === table).flatMap(w => w.rows);
 
 // Objects built inside the vm have a different Object.prototype, so
@@ -150,7 +163,7 @@ describe('FactoryDB.push — role decides what may be written', () => {
     // workers(id). Catalogue-last would fail with 23503 on a fresh database.
     const { DB, sb } = bootDB();
     await DB.init();
-    await DB.push(S(), 'owner');
+    await pushClaimed(DB, S(), 'owner');
 
     const order = sb._writes.map(w => w.table);
     assert.ok(order.indexOf('workers') < order.indexOf('attendance'),
@@ -161,7 +174,7 @@ describe('FactoryDB.push — role decides what may be written', () => {
   test('a supervisor never writes the catalogues or owner documents', async () => {
     const { DB, sb } = bootDB();
     await DB.init();
-    await DB.push(S(), 'supervisor');
+    await pushClaimed(DB, S(), 'supervisor');
 
     const tables = new Set(sb._writes.map(w => w.table));
     for (const forbidden of ['workers', 'rm_catalogue', 'fg_catalogue', 'factory_doc']) {
@@ -174,7 +187,7 @@ describe('FactoryDB.push — role decides what may be written', () => {
   test('an RM supervisor writes only raw material movement', async () => {
     const { DB, sb } = bootDB();
     await DB.init();
-    await DB.push(S(), 'rm');
+    await pushClaimed(DB, S(), 'rm');
 
     const tables = new Set(sb._writes.map(w => w.table));
     assert.deepEqual([...tables].sort(), ['raw_log']);
@@ -185,7 +198,7 @@ describe('FactoryDB.push — role decides what may be written', () => {
   test('attendance rows carry the work date and conflict on (date, worker)', async () => {
     const { DB, sb } = bootDB();
     await DB.init();
-    await DB.push(S(), 'supervisor');
+    await pushClaimed(DB, S(), 'supervisor');
 
     const w = sb._writes.find(x => x.table === 'attendance');
     assert.equal(w.opts.onConflict, 'work_date,worker_id');
@@ -202,7 +215,7 @@ describe('FactoryDB.push — role decides what may be written', () => {
     s.lab[0].wage = '';
     s.lab[0].otHours = undefined;
     s.rawLog[0].qty = null;
-    await DB.push(s, 'owner');
+    await pushClaimed(DB, s, 'owner');
 
     assert.equal(rowsFor(sb, 'workers')[0].wage, 0);
     assert.equal(rowsFor(sb, 'attendance')[0].ot_hours, 0);
@@ -221,7 +234,7 @@ describe('FactoryDB.push — role decides what may be written', () => {
     const s = S();
     s.fgTransfers = [{ id: 3, product: 'Chair A', from: 'Moulding', to: 'Finishing', qty: 4 }];
     s.fgStock = { Packing: { 'Chair A': 12 } };
-    await DB.push(s, 'rm');
+    await pushClaimed(DB, s, 'rm');
 
     const tables = new Set(sb._writes.map(w => w.table));
     assert.deepEqual([...tables].sort(), ['fg_stock', 'fg_transfers', 'raw_log']);
@@ -236,7 +249,7 @@ describe('FactoryDB — offline outbox', () => {
   test('parks a write while offline instead of losing it', async () => {
     const { DB, localStorage } = bootDB({ onLine: false });
     await DB.init();
-    await DB.push({ workDate: '2026-08-19', lab: [{ id: 1, name: 'R', wage: 400 }] }, 'supervisor');
+    await pushClaimed(DB, { workDate: '2026-08-19', lab: [{ id: 1, name: 'R', wage: 400 }] }, 'supervisor');
 
     assert.ok(DB.pendingWrites() > 0, 'offline writes must be queued');
     const q = JSON.parse(localStorage.getItem('_sb_outbox'));
@@ -246,7 +259,7 @@ describe('FactoryDB — offline outbox', () => {
   test('queues a write the server rejected, rather than dropping it', async () => {
     const { DB } = bootDB({ failOn: ['attendance'] });
     await DB.init();
-    await DB.push({ workDate: '2026-08-19', lab: [{ id: 1, name: 'R', wage: 400 }], sessions: [] }, 'supervisor');
+    await pushClaimed(DB, { workDate: '2026-08-19', lab: [{ id: 1, name: 'R', wage: 400 }], sessions: [] }, 'supervisor');
     assert.ok(DB.pendingWrites() > 0);
   });
 
@@ -287,7 +300,7 @@ describe('FactoryDB — offline outbox', () => {
   test('an empty write is a no-op, not a queued empty batch', async () => {
     const { DB, sb } = bootDB({ onLine: false });
     await DB.init();
-    await DB.push({ workDate: '2026-08-19', lab: [], sessions: [], rawLog: [], fgTransfers: [], fgStock: {} }, 'supervisor');
+    await pushClaimed(DB, { workDate: '2026-08-19', lab: [], sessions: [], rawLog: [], fgTransfers: [], fgStock: {} }, 'supervisor');
     assert.equal(DB.pendingWrites(), 0);
     assert.equal(sb._writes.length, 0);
   });
@@ -408,7 +421,7 @@ describe('FactoryDB — fg_stock column mapping', () => {
   test('writes the product into product and the stage into stage', async () => {
     const { DB, sb } = bootDB();
     await DB.init();
-    await DB.push({
+    await pushClaimed(DB, {
       workDate: '2026-08-19',
       fgStock: { Packing: { 'Chair A': 12 } },   // [stage][product], as app.js builds it
       lab: [], sessions: [], rawLog: [], fgTransfers: [],
@@ -425,7 +438,7 @@ describe('FactoryDB — fg_stock column mapping', () => {
     // what pins the orientation. This checks the pair still composes.
     const { DB, sb } = bootDB();
     await DB.init();
-    await DB.push({
+    await pushClaimed(DB, {
       workDate: '2026-08-19', fgStock: { Packing: { 'Chair A': 12 } },
       lab: [], sessions: [], rawLog: [], fgTransfers: [],
     }, 'rm');
