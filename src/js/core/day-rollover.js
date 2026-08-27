@@ -116,13 +116,25 @@ function paintBanner(){
   el.style.display='flex';
 }
 
-function repaint(){
+/**
+ * @param {boolean} fromRemote  true when this was triggered by another
+ *   device rather than by the person at this one.
+ *
+ * A remote event must not re-render the production screen. Re-rendering it
+ * resets the selected team and wipes half-typed inputs, which is why the
+ * realtime callback in sync.js has always skipped it — and why repaint() has
+ * to skip it too, now that a remote day-closure reaches this module.
+ * A repaint the user asked for (they picked a date) still paints everything.
+ */
+function repaint(fromRemote){
   var wd=document.getElementById('work-date'); if(wd) wd.value=S.workDate;
   paintBanner();
   try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
   try{renderDashboard();}catch(e){}
   var sid=(document.querySelector('.screen.active')||{}).id;
-  if(sid) try{go(sid.replace('sc-',''));}catch(e){}
+  if(!sid) return;
+  if(fromRemote && sid==='sc-sup') return;
+  try{go(sid.replace('sc-',''));}catch(e){}
 }
 
 /**
@@ -192,7 +204,7 @@ export function openWorkDate(date, opts){
  * leftover, so show the ledger's version of the day and mark it reopened —
  * visibly a closed day being viewed, not today's work.
  */
-export function reconcileOpenDay(){
+export function reconcileOpenDay(fromRemote){
   if(!S || !S.workDate) return false;
   if(!isDaySaved(S.workDate)){
     if(S.reopenDate) S.reopenDate = null;
@@ -200,7 +212,7 @@ export function reconcileOpenDay(){
   }
   S.reopenDate = S.workDate;
   loadFromLedger((S.ledger||[]).find(function(e){return e.date===S.workDate;}));
-  repaint();
+  repaint(fromRemote);
   return true;
 }
 

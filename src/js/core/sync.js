@@ -128,6 +128,10 @@ export function startFirebaseSync(){
     // Whole-state replacement goes through core/state.js so its exported
     // binding and the window bridge stay in step.
     setS(state);
+    // A day_ledger event means someone closed a day — possibly the one this
+    // device has open. Without this the table was watched to no purpose: the
+    // event arrived, the pull ran, and nothing acted on it.
+    try{ reconcileOpenDay(true); }catch(e){ console.warn('[sync] reconcile:', e); }
     try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
     updateSyncDot('ok');
     try{ renderDashboard(); }catch(e){}
