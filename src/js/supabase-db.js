@@ -795,6 +795,32 @@
     writeDirty(d, ids);
   }
 
+  // ── IS THIS DEVICE'S CLOCK RIGHT? ──────────────────────────────
+  // Every work_date the app writes comes from the DEVICE clock, and lands in a
+  // Postgres `date` column that the monthly reports group by. A phone with the
+  // wrong date files a real shift under the wrong day and nothing says so.
+  //
+  // The app cannot fix the clock, so it reports the disagreement instead.
+  // Null when the check could not run (offline, or the function is not
+  // deployed yet) — never guessed, because a wrong "all clear" is worse than
+  // no answer.
+  var clockSkew = null;
+  async function checkClock(deviceToday) {
+    if (!ready) return null;
+    try {
+      var res = await sb.rpc('server_today');
+      if (res.error || !res.data) return null;
+      var server = String(res.data).slice(0, 10);
+      clockSkew = (server === deviceToday) ? null : { device: deviceToday, server: server };
+      if (clockSkew) {
+        console.error('[FactoryDB] this device thinks today is ' + deviceToday +
+                      ', the server says ' + server +
+                      ' — work would be filed under the wrong day');
+      }
+      return clockSkew;
+    } catch (e) { return null; }
+  }
+
   // ── SAVE DAY ────────────────────────────────────────────────────
   // One row per day. No 1 MiB ceiling, unlike the old ledger[] array.
   async function saveDay(workDate, payload) {
@@ -863,6 +889,8 @@
     flushOutbox: flushOutbox,
     pendingWrites: function () { return outbox().length; },
     lastPullOk: function () { return lastPullOk; },
+    checkClock: checkClock,
+    clockSkew: function () { return clockSkew; },
     lastWriteError: function () { return lastWriteError; },
     isReady: function () { return ready; },
     role: function () { return currentRole; },

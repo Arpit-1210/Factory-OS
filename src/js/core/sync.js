@@ -85,6 +85,26 @@ export async function pushToFirebase(){
 // Returns true only when every query came back clean. Callers that are about
 // to PUSH must check it: pushing after a failed pull broadcasts whatever stale
 // or half-wiped state this device happens to hold over good rows on the server.
+/**
+ * Tell the user when this device's date disagrees with the server's.
+ *
+ * Silent otherwise. The app cannot correct a wrong clock, but it must not let
+ * a shift be filed under the wrong day without saying so.
+ */
+async function reportClockSkew(){
+  const el = document.getElementById('clock-banner');
+  if(!el || !FactoryDB.checkClock) return;
+  const skew = await FactoryDB.checkClock(todayStr());
+  if(!skew){ el.style.display='none'; return; }
+  const txt = document.getElementById('clock-banner-text');
+  if(txt){
+    txt.textContent = 'This device’s date (' + skew.device + ') does not match the server (' +
+      skew.server + '). Work recorded now would be filed under the wrong day. ' +
+      'Fix the date in the device settings.';
+  }
+  el.style.display='flex';
+}
+
 export async function pullFromFirebase(){
   if(!fbEnabled) return false;
   await FactoryDB.pull(S);
@@ -93,6 +113,7 @@ export async function pullFromFirebase(){
   // earlier, or by another device just now. A closed day must render from its
   // ledger entry, never from the operational rows the pull just fetched.
   try{ reconcileOpenDay(); }catch(e){ console.warn('[sync] reconcile:', e); }
+  try{ await reportClockSkew(); }catch(e){ console.warn('[sync] clock:', e); }
   try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
   return FactoryDB.lastPullOk();
 }
