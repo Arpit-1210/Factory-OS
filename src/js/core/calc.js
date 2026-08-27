@@ -39,6 +39,22 @@ export function sessionMembers(ss){
   return sessionTeams(ss).reduce(function(a,t){ return a.concat(t.team||[]); },[]);
 }
 
+/**
+ * Closed days EXCEPT the one currently open.
+ *
+ * Anything that adds the open day to the ledger has to exclude the open day
+ * FROM the ledger, or it counts that day twice. S.sessions and the ledger
+ * entry for S.workDate describe the same production whenever a closed day is
+ * open for editing — and, until the day-lifecycle fix, whenever a closed day
+ * was accidentally reopened by a rollover.
+ *
+ * computeSalaryMonth() had this guard from the start. getFGBalance(),
+ * renderTaskBoard() and both Excel exports did not.
+ */
+export function closedDaysExcludingOpen(){
+  return (S.ledger||[]).filter(e => e.date !== S.workDate);
+}
+
 export function getFGBalance(productName, stage){
   if(!S.fgStock) return 0;
 
@@ -52,7 +68,7 @@ export function getFGBalance(productName, stage){
         .filter(p=>(p.baseName||p.name)===productName||p.name===productName)
         .reduce((c,p)=>c+p.qty,0),0)
   ,0);
-  const producedHistory = S.ledger.reduce((a,day)=>
+  const producedHistory = closedDaysExcludingOpen().reduce((a,day)=>
     a+(day.sessions||[]).reduce((b,ss)=>
       b+(ss.teams||[]).filter(t=>t.stage===stage)
         .reduce((c,t)=>c+(t.production||[])
@@ -63,6 +79,12 @@ export function getFGBalance(productName, stage){
 
   // 3. Transferred IN to this stage from another stage (stage-to-stage moves)
   //    Only count inter-stage transfers (not Order- or Dispatch destinations which are exits)
+  //
+  //    S.fgTransfers holds EVERY transfer, not just the open day's. It used to
+  //    be filtered to the work date by pull(), which made this formula
+  //    "all-time production minus today's transfers only": every transfer out
+  //    from every previous day vanished from the balance, so stage stock
+  //    inflated a little more each day, on every device.
   const REAL_STAGES = ['Moulding','Finishing','Painting','Packing'];
   const transferredIn = (S.fgTransfers||[]).filter(t=>{
     if(t.to!==stage) return false;
