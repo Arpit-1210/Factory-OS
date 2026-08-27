@@ -331,8 +331,17 @@
   // sessions_sup_update only lets them UPDATE their own — so push() has to
   // know which of the rows it just read actually belong to this user. Dropping
   // the column here is what made push() stamp its own uid onto everyone's row.
+  //
+  // `date` is projected for a reason that cost a day of production data. Every
+  // guard that decides whether a session belongs to the OPEN day or to a
+  // CLOSED one keys off this field — isDaySaved(s.date) in day-rollover.js
+  // above all. Dropping it here made `s.date` undefined on every session that
+  // had been through a pull, so isDaySaved(undefined) answered "not saved",
+  // and the midnight rollover carried a closed day's production into the new
+  // day and re-stamped it. The ledger then held the same production twice.
   function sessionRowToState(r) {
     return {
+      date:      r.work_date,
       supId:     r.sup_id,
       supName:   r.sup_name,
       supWage:   Number(r.sup_wage) || 0,
@@ -455,7 +464,7 @@
       // on the strength of it.
       if (!res[5].error) S.rawLog = (res[5].data || []).map(function (r) {
         return {
-          id: r.id, stage: r.stage, name: r.rm_name, unit: r.unit,
+          id: r.id, date: r.work_date, stage: r.stage, name: r.rm_name, unit: r.unit,
           qty: Number(r.qty) || 0,
           unitPrice: Number(r.unit_price) || 0,
           cost: Number(r.cost) || 0,
@@ -465,7 +474,7 @@
 
       if (!res[6].error) S.fgTransfers = (res[6].data || []).map(function (r) {
         return {
-          id: r.id, product: r.product, from: r.from_stage,
+          id: r.id, date: r.work_date, product: r.product, from: r.from_stage,
           to: r.to_stage, qty: Number(r.qty) || 0,
           loggedBy: r.logged_by || null
         };
@@ -666,9 +675,16 @@
     }
 
     if (role === 'supervisor' || role === 'rm' || role === 'owner') {
+      // ── EACH ROW CARRIES ITS OWN DATE ──
+      // These two tables upsert on `id`, so stamping a single global
+      // `workDate` onto every row did not merely mislabel them — it MOVED an
+      // existing row from the day it was recorded on to the day the device
+      // happened to be showing, deleting it from the first. Falling back to
+      // workDate keeps rows created in this session (which have no date yet)
+      // on the open day.
       var rawRows = (S.rawLog || []).map(function (r) {
         return {
-          id: r.id, work_date: workDate, stage: r.stage, rm_name: r.name,
+          id: r.id, work_date: r.date || workDate, stage: r.stage, rm_name: r.name,
           unit: r.unit, qty: Number(r.qty) || 0,
           unit_price: Number(r.unitPrice) || 0,
           cost: Number(r.cost) || 0, logged_by: r.loggedBy || uid
@@ -678,7 +694,7 @@
 
       var xferRows = (S.fgTransfers || []).map(function (t) {
         return {
-          id: t.id, work_date: workDate, product: t.product,
+          id: t.id, work_date: t.date || workDate, product: t.product,
           from_stage: t.from, to_stage: t.to,
           qty: Number(t.qty) || 0, logged_by: t.loggedBy || uid
         };
