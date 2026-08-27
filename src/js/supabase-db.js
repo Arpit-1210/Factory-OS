@@ -365,7 +365,11 @@
         sb.from('attendance').select('*').eq('work_date', workDate),
         sb.from('production_sessions').select('*').eq('work_date', workDate),
         sb.from('raw_log').select('*').eq('work_date', workDate),
-        sb.from('fg_transfers').select('*').eq('work_date', workDate),
+        // NOT filtered by work_date. FG stock is cumulative: getFGBalance()
+        // subtracts transfers from all-time production, so fetching only the
+        // open day's transfers made every past transfer-out disappear from
+        // the balance and stage stock inflated a little more each day.
+        sb.from('fg_transfers').select('*'),
         sb.from('fg_stock').select('*'),
         sb.from('day_ledger').select('*').order('work_date'),
         sb.from('factory_doc').select('*')
