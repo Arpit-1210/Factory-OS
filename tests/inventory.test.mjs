@@ -243,3 +243,45 @@ describe('fg_stock rows reach getFGBalance with the right orientation', () => {
     assert.deepEqual(after, [[8, 0], [3, 5]]);
   });
 });
+
+describe('getFGBalance — a day that is both open and closed', () => {
+  // S.sessions and the ledger entry for S.workDate describe the SAME
+  // production whenever a closed day is open for editing. Counting both adds
+  // that day's output to stock twice. computeSalaryMonth() guarded against
+  // this from the start; this function did not.
+  test('the open day is counted once, not once per source', () => {
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.sessions = [session('Moulding', [made('Chair', 10)])];
+    S.ledger = [{ date: '2026-08-19', sessions: [session('Moulding', [made('Chair', 10)])] }];
+
+    assert.equal(bal('Chair', 'Moulding'), 10,
+      'ten chairs were made, not twenty');
+  });
+
+  test('other closed days still count', () => {
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.sessions = [session('Moulding', [made('Chair', 10)])];
+    S.ledger = [
+      { date: '2026-08-19', sessions: [session('Moulding', [made('Chair', 10)])] },
+      { date: '2026-08-18', sessions: [session('Moulding', [made('Chair', 4)])] },
+    ];
+
+    assert.equal(bal('Chair', 'Moulding'), 14);
+  });
+});
+
+describe('getFGBalance — production and transfers span the same period', () => {
+  test('a transfer out from an earlier day still reduces the balance', () => {
+    // The formula nets all-time production against S.fgTransfers. pull() used
+    // to fetch only the open day's transfers, so this subtraction silently
+    // dropped every earlier movement and stage stock inflated day after day.
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.ledger = [{ date: '2026-08-18', sessions: [session('Moulding', [made('Chair', 10)])] }];
+    S.fgTransfers = [
+      { id: 1, date: '2026-08-18', product: 'Chair', from: 'Moulding', to: 'Finishing', qty: 6 },
+    ];
+
+    assert.equal(bal('Chair', 'Moulding'), 4, '10 made, 6 moved on');
+    assert.equal(bal('Chair', 'Finishing'), 6, 'and they arrived at the next stage');
+  });
+});
