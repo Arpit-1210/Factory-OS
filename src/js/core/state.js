@@ -30,6 +30,8 @@ export function defaultState() {
     fg:  FG_SEED.map(f => ({ ...f })),
     lab: LAB_SEED.map(l => ({ ...l })),
     sessions: [], rawLog: [], workDate: todayStr(), ledger: [],
+    // Set only while a closed day is deliberately open for editing.
+    reopenDate: null,
     orders: [], stock: [], purchases: [],
     fgStock: {}, fgTransfers: [], fgAdjustments: [],
     dispatches: [], salaryAdj: {}, bom: {}, unitTransfers: [],
@@ -48,41 +50,68 @@ export function loadState() {
       merged.sheetsUrl = SHEETS_URL;
 
       const today = todayStr();
-      const staleDate = merged.workDate || today;
-      const thisDateCleared = localStorage.getItem('_day_cleared_' + staleDate);
-      const lastSavedDate = localStorage.getItem('_last_saved_date');
+      const stored = merged.workDate || today;
+      const closed = (d) => !!(d && (merged.ledger||[]).some(e => e.date === d));
 
-      // Start a clean day if the date rolled over, the day was saved, or it
-      // was explicitly cleared. Carrying yesterday's sessions forward would
-      // re-count that production against today.
-      if (merged.workDate !== today || thisDateCleared || lastSavedDate === merged.workDate) {
+      // The first day at or after `today` that has not been closed. Duplicated
+      // from day-rollover.js rather than imported: that module imports this
+      // one, and a cycle here runs during module init, before the functions
+      // exist. Six lines is a cheaper price than the cycle.
+      const firstOpenDay = () => {
+        let d = today;
+        for (let i = 0; i < 400 && closed(d); i++) {
+          const n = new Date(d + 'T00:00:00');
+          n.setDate(n.getDate() + 1);
+          d = `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;
+        }
+        return d;
+      };
+
+      // ── WHICH DAY IS OPEN AFTER A RELOAD ──
+      //
+      // This decision used to be driven by two localStorage flags,
+      // `_day_cleared_<date>` and `_last_saved_date`. Both are gone; the
+      // ledger says whether a day is closed, and it is shared across devices
+      // rather than being one device's private opinion.
+      //
+      // Three cases, and the old code got two of them wrong.
+      if (merged.reopenDate && merged.reopenDate === stored && closed(stored)) {
+        // 1. A day deliberately reopened for editing. It survives the reload —
+        //    otherwise opening an old date and pressing refresh threw the user
+        //    back to today, which is most of why editing an old date "stopped
+        //    working".
+      } else if (stored < today && !closed(stored)) {
+        // 2. A past day that was never closed. LEAVE IT OPEN. The old code
+        //    wiped its sessions and moved to today without writing a ledger
+        //    row, so the day vanished from the app entirely: nothing in
+        //    Monthly, and its production_sessions/attendance rows stranded in
+        //    Postgres where no query ever asks for them again. An unsaved day
+        //    still needs closing by hand.
+        merged.reopenDate = null;
+      } else if (stored !== today || closed(stored)) {
+        // 3. The calendar rolled over, Save Day parked us on tomorrow, or the
+        //    stored day has since been closed (possibly by another device).
+        //    Start a clean day — and never land on a closed one, which is what
+        //    put a closed day's production back under Today's Production.
         merged.sessions = [];
         merged.rawLog = [];
         if (merged.lab) merged.lab.forEach(l => { l.present = false; l.doingOT = false; l.otHours = 0; });
-        merged.workDate = today;
-
-        // ── CONSUME THE FLAGS, DO NOT JUST READ THEM ──
-        // These two used to be write-once and never cleared, so the wipe they
-        // triggered repeated on EVERY subsequent load:
-        //
-        //   · `_day_cleared_<date>` is also written for TODAY by
-        //     onLoginSuccess() when someone signs in against a past date. One
-        //     such login poisoned the rest of the calendar day — every reload
-        //     cleared attendance and sessions before the pull could restore
-        //     them, which is what "attendance disappears after refresh" looked
-        //     like from the floor.
-        //   · `_last_saved_date` matched again the moment the line above set
-        //     workDate back to today, so after one Save Day the app re-wiped
-        //     itself on every load for the rest of the day.
-        //
-        // The day is closed now; the flags have done their job. Whether a day
-        // is saved is recorded durably in S.ledger / day_ledger, which is what
-        // day-rollover.js actually consults.
-        try {
-          localStorage.removeItem('_day_cleared_' + staleDate);
-          if (lastSavedDate === staleDate) localStorage.removeItem('_last_saved_date');
-        } catch (e) {}
+        merged.workDate = firstOpenDay();
+        merged.reopenDate = null;
       }
+
+      // ── MIGRATION: drop the retired day flags ──
+      // `_day_cleared_<date>` was written once per closed day and never
+      // removed, so an install accumulated one key per working day forever.
+      // Nothing reads either flag now; clear them out so they stop growing.
+      try {
+        const dead = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.indexOf('_day_cleared_') === 0 || k === '_last_saved_date')) dead.push(k);
+        }
+        dead.forEach(k => localStorage.removeItem(k));
+      } catch (e) {}
 
       // ── ONE-TIME MIGRATION: legacy OT field ──
       // `ot` used to hold a flat rupee-per-day amount. OT is now paid per hour

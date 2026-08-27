@@ -5,7 +5,7 @@
 import { doLogin } from './core/auth.js';
 import { calcOT } from './core/calc.js';
 import { APPS_SCRIPT_CODE, LS_KEY, SHEETS_URL } from './core/config.js';
-import { checkDayRollover } from './core/day-rollover.js';
+import { checkDayRollover, isDaySaved, openWorkDate } from './core/day-rollover.js';
 import { updateSyncStatus } from './core/sheets-sync.js';
 import { rawFill } from './screens/raw.js';
 import { todayStr } from './core/format.js';
@@ -187,7 +187,10 @@ try{
   if(!S.orders) S.orders=[];
   if(!S.purchases) S.purchases=[];
   const wd=document.getElementById('work-date');
-  if(wd){ wd.value=today; }
+  // S.workDate, not today: loadState() may legitimately have left an unsaved
+  // past day open, and showing 'today' over it invited the user to record
+  // against a day the app was not actually on.
+  if(wd){ wd.value=S.workDate; wd.max=today; }
   if(!S.fgTransfers) S.fgTransfers=[];
   if(!S.fgAdjustments) S.fgAdjustments=[];
   if(!S.fgStock) S.fgStock={};
@@ -199,7 +202,38 @@ try{
   updateSyncStatus();
   const rq=document.getElementById('raw-qty');if(rq)rq.addEventListener('input',rawFill);
   const rm=document.getElementById('raw-mat');if(rm)rm.addEventListener('change',rawFill);
-  document.getElementById('work-date').addEventListener('change',function(){S.workDate=this.value;persist();});
+  // ── THE HEADER DATE PICKER ──
+  // This used to be `S.workDate = this.value; persist()`. No validation, no
+  // reload of the day being opened, and persist() pushes two seconds later —
+  // so picking a date re-stamped the CURRENT day's attendance, sessions and
+  // raw log onto it, and moved raw_log/fg_transfers rows (which upsert on id)
+  // off the day they were recorded on. removeMissing then deleted real rows on
+  // the target date that this device did not know about. Looking at an old day
+  // rewrote it.
+  //
+  // It is also the only in-app way to reach a past day, so it has to work
+  // rather than merely be safe.
+  document.getElementById('work-date').addEventListener('change', function(){
+    const chosen = this.value;
+    if(!chosen){ this.value = S.workDate; return; }
+    if(chosen > todayStr()){
+      alert('That date is in the future. Work can only be recorded up to today.');
+      this.value = S.workDate;
+      return;
+    }
+    if(isDaySaved(chosen)){
+      const pretty = new Date(chosen+'T00:00:00')
+        .toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'});
+      if(!confirm(pretty + ' is closed and already counted in Monthly Data.' +
+                  '\n\nOpen it for editing? Saving again will replace that day’s entry.')){
+        this.value = S.workDate;
+        return;
+      }
+      openWorkDate(chosen, {reopen:true});
+      return;
+    }
+    openWorkDate(chosen);
+  });
   const ac=document.getElementById('apps-script-code');if(ac)ac.value=APPS_SCRIPT_CODE;
 
   // Firebase initializes after login (see doLogin)
@@ -257,8 +291,12 @@ initFirebase();
 // ── Session backup every 5 min ──
 setInterval(function(){
   if(S&&S.sessions&&S.sessions.length>0){
+    // Keyed on the OPEN day, not the wall clock. Keyed on todayStr() it
+    // refused to restore whenever the open day was not today (a reopened past
+    // day, or the day after Save Day) and, worse, could restore one day's
+    // sessions into another.
     try{localStorage.setItem('_sessions_backup_',JSON.stringify({
-      sessions:S.sessions,date:todayStr(),savedAt:Date.now()
+      sessions:S.sessions,date:S.workDate,savedAt:Date.now()
     }));}catch(e){}
   }
 }, 5*60*1000);
@@ -269,9 +307,7 @@ setInterval(function(){
     var bk=localStorage.getItem('_sessions_backup_');
     if(!bk) return;
     var b=JSON.parse(bk);
-    var td=new Date();
-    var today=td.getFullYear()+'-'+String(td.getMonth()+1).padStart(2,'0')+'-'+String(td.getDate()).padStart(2,'0');
-    if(b.date===today&&(Date.now()-b.savedAt)<12*3600000){
+    if(b.date===S.workDate&&(Date.now()-b.savedAt)<12*3600000){
       if(S&&(!S.sessions||S.sessions.length===0)&&b.sessions.length>0){
         S.sessions=b.sessions;
         try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}

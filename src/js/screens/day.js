@@ -20,6 +20,7 @@ import { calcOT } from '../core/calc.js';
 import { STAGES } from '../core/config.js';
 import { fmt, fmtN } from '../core/format.js';
 import { go } from '../core/router.js';
+import { addDays, nextOpenDate } from '../core/day-rollover.js';
 import { fbEnabled } from '../core/session.js';
 import { S } from '../core/state.js';
 import { persist, pushToFirebase } from '../core/sync.js';
@@ -139,10 +140,13 @@ export async function saveDay(){
   const entry = {...payload, date:S.workDate, rawLog:S.rawLog.map(r=>({...r}))};
 
   const savedDate = S.workDate;
-  const next = new Date(savedDate+'T00:00:00');
-  next.setDate(next.getDate()+1);
-  const nextStr = `${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}-${String(next.getDate()).padStart(2,'0')}`;
-  const nextLabel = next.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'});
+  // Advance to the first day that is not already closed, not blindly to the
+  // next calendar day. Re-closing an old day used to land the user on the day
+  // after it — which is usually itself closed — so the app opened a day that
+  // belonged to history and showed its production as today's.
+  const nextStr = nextOpenDate(addDays(savedDate,1));
+  const nextLabel = new Date(nextStr+'T00:00:00')
+    .toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'});
 
   const btn = document.querySelector('[data-click="saveDay"]');
   const restore = btn ? btn.textContent : '';
@@ -183,14 +187,17 @@ export async function saveDay(){
 
   if(S.sheetsUrl){ sendViaImage(S.sheetsUrl, payload); }
 
-  localStorage.setItem('_day_cleared_'+savedDate, '1');
-  localStorage.setItem('_last_saved_date', savedDate);
-  localStorage.removeItem('_day_cleared_'+nextStr); // clear tomorrow's flag
-
+  // The `_day_cleared_<date>` and `_last_saved_date` flags that used to be
+  // written here are gone. They were a per-device, unsynced second opinion on
+  // what the ledger already records, they never expired, and `_last_saved_date`
+  // stayed armed one load too long — wiping work re-entered on a closed day
+  // and then pushing the wipe. The ledger row written above IS the record that
+  // this day is closed, and every device sees it.
   S.sessions = [];
   S.rawLog = [];
   S.lab.forEach(l=>{ l.present=false; l.doingOT=false; l.otHours=0; });
   S.workDate = nextStr;
+  S.reopenDate = null;
   const wdEl = document.getElementById('work-date');
   if(wdEl) wdEl.value = nextStr;
   persist();

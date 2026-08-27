@@ -59,6 +59,7 @@ import * as assignModal from '../components/assign-modal.js';
 import * as sidebar from '../components/sidebar.js';
 
 import * as auth from './auth.js';
+import * as dayRollover from './day-rollover.js';
 import * as router from './router.js';
 import * as sync from './sync.js';
 import * as sheetsSync from './sheets-sync.js';
@@ -75,7 +76,7 @@ const ACTIONS = Object.assign(
   month, orders, payments, production, raw, rmpurchase, salary, setup, sheets,
   stock, transfers,
   assignModal, sidebar,
-  auth, router, sync, sheetsSync,
+  auth, dayRollover, router, sync, sheetsSync,
 );
 
 /** Names the markup can reference. Exported so tests can audit coverage. */

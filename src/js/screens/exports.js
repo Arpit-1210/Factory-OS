@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { calcOT, getFGBalance } from '../core/calc.js';
+import { calcOT, closedDaysExcludingOpen, getFGBalance } from '../core/calc.js';
 import { FG_STAGES } from '../core/config.js';
 import { todayStr } from '../core/format.js';
 import { S } from '../core/state.js';
@@ -56,7 +56,10 @@ export function exportAttendance(){
       rows.push([S.workDate,l.name,l.role,l.wage,otHrs,otAmt,l.present?'Present':'Absent',l.present?l.wage:0]);
     });
   }
-  S.ledger.filter(e=>inRange(e.date,from,to)).forEach(day=>(day.attendance||[]).forEach(a=>{
+  // closedDaysExcludingOpen(), not S.ledger: the open day is already written
+  // out above from S.lab, so a day that is both open and closed would appear
+  // twice in the sheet.
+  closedDaysExcludingOpen().filter(e=>inRange(e.date,from,to)).forEach(day=>(day.attendance||[]).forEach(a=>{
     const l=S.lab.find(x=>x.id===a.id);if(!l)return;
     const otHrs=a.doingOT?(parseFloat(a.otHours)||0):0;
     const otAmt=Math.round((l.wage/8)*otHrs);
@@ -75,7 +78,7 @@ export function exportProduction(){
       rows.push([S.workDate,ss.supName,t.stage,p.name,p.qty,p.unitVal||0,p.value||0]);
     })));
   }
-  S.ledger.filter(e=>inRange(e.date,from,to)).forEach(day=>(day.sessions||[]).forEach(ss=>(ss.teams||[]).forEach(t=>(t.production||[]).forEach(p=>{
+  closedDaysExcludingOpen().filter(e=>inRange(e.date,from,to)).forEach(day=>(day.sessions||[]).forEach(ss=>(ss.teams||[]).forEach(t=>(t.production||[]).forEach(p=>{
     rows.push([day.date,ss.supName,t.stage,p.name,p.qty,p.unitVal||0,p.value||0]);
   }))));
   const ws=XLSX.utils.aoa_to_sheet(rows);const wb=XLSX.utils.book_new();

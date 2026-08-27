@@ -175,6 +175,21 @@ export default `<!-- ── LOGIN ── -->
       </div>
     </div>
 
+    <!-- Shown only while a CLOSED day is open for editing. Without it the app
+         looks identical whether you are recording today's work or editing a
+         day that is already counted in Monthly Data. -->
+    <!-- Shown when the device clock disagrees with the server about the date.
+         Every work_date comes from the device clock, so a wrong one files a
+         real shift under the wrong day with nothing to show for it. -->
+    <div id="clock-banner" style="display:none;align-items:center;gap:12px;padding:8px 16px;background:rgba(239,68,68,.12);border-bottom:1px solid var(--red);font-size:12px;color:var(--red)">
+      <span id="clock-banner-text" style="flex:1"></span>
+    </div>
+
+    <div id="reopen-banner" style="display:none;align-items:center;gap:12px;padding:8px 16px;background:rgba(245,158,11,.12);border-bottom:1px solid var(--amber);font-size:12px;color:var(--amber)">
+      <span id="reopen-banner-text" style="flex:1"></span>
+      <button class="btn" data-click="returnToToday" style="padding:4px 12px;font-size:11px">Back to today</button>
+    </div>
+
     <div class="screens">
 
       <!-- ══ DASHBOARD ══ -->

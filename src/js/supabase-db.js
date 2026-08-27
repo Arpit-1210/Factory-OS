@@ -331,8 +331,17 @@
   // sessions_sup_update only lets them UPDATE their own — so push() has to
   // know which of the rows it just read actually belong to this user. Dropping
   // the column here is what made push() stamp its own uid onto everyone's row.
+  //
+  // `date` is projected for a reason that cost a day of production data. Every
+  // guard that decides whether a session belongs to the OPEN day or to a
+  // CLOSED one keys off this field — isDaySaved(s.date) in day-rollover.js
+  // above all. Dropping it here made `s.date` undefined on every session that
+  // had been through a pull, so isDaySaved(undefined) answered "not saved",
+  // and the midnight rollover carried a closed day's production into the new
+  // day and re-stamped it. The ledger then held the same production twice.
   function sessionRowToState(r) {
     return {
+      date:      r.work_date,
       supId:     r.sup_id,
       supName:   r.sup_name,
       supWage:   Number(r.sup_wage) || 0,
@@ -356,7 +365,11 @@
         sb.from('attendance').select('*').eq('work_date', workDate),
         sb.from('production_sessions').select('*').eq('work_date', workDate),
         sb.from('raw_log').select('*').eq('work_date', workDate),
-        sb.from('fg_transfers').select('*').eq('work_date', workDate),
+        // NOT filtered by work_date. FG stock is cumulative: getFGBalance()
+        // subtracts transfers from all-time production, so fetching only the
+        // open day's transfers made every past transfer-out disappear from
+        // the balance and stage stock inflated a little more each day.
+        sb.from('fg_transfers').select('*'),
         sb.from('fg_stock').select('*'),
         sb.from('day_ledger').select('*').order('work_date'),
         sb.from('factory_doc').select('*')
@@ -455,7 +468,7 @@
       // on the strength of it.
       if (!res[5].error) S.rawLog = (res[5].data || []).map(function (r) {
         return {
-          id: r.id, stage: r.stage, name: r.rm_name, unit: r.unit,
+          id: r.id, date: r.work_date, stage: r.stage, name: r.rm_name, unit: r.unit,
           qty: Number(r.qty) || 0,
           unitPrice: Number(r.unit_price) || 0,
           cost: Number(r.cost) || 0,
@@ -465,7 +478,7 @@
 
       if (!res[6].error) S.fgTransfers = (res[6].data || []).map(function (r) {
         return {
-          id: r.id, product: r.product, from: r.from_stage,
+          id: r.id, date: r.work_date, product: r.product, from: r.from_stage,
           to: r.to_stage, qty: Number(r.qty) || 0,
           loggedBy: r.logged_by || null
         };
@@ -610,14 +623,34 @@
         }
       }
 
-      var attRows = lab.map(function (l) {
+      // ── ONLY PUSH THE WORKERS THIS DEVICE ACTUALLY MARKED ──
+      // Every device used to push a row for EVERY worker, upserting on
+      // (work_date, worker_id). attendance is multi-writer — two supervisors
+      // mark their own lines — so the last device to push simply overwrote the
+      // other's marks with its own stale view: one phone that had been in a
+      // pocket since morning set the whole factory absent for the day.
+      //
+      // A device may only assert attendance for workers it has touched since
+      // its last push. Everyone else's rows are left exactly as they are. An
+      // unmarked worker has no row at all, which already means absent, so
+      // nothing is lost by staying quiet about them.
+      var touched = readDirty(workDate);
+      var attLab = lab.filter(function (l) { return touched[l.id]; });
+      var attRows = attLab.map(function (l) {
         return {
           work_date: workDate, worker_id: l.id,
           present: !!l.present, doing_ot: !!l.doingOT,
           ot_hours: Number(l.otHours) || 0, marked_by: uid
         };
       });
-      await write('attendance', attRows, { onConflict: 'work_date,worker_id' });
+      if (attRows.length) {
+        await write('attendance', attRows, { onConflict: 'work_date,worker_id' });
+        // Cleared only after the write, not on pull: a mark made between a
+        // pull and a push must not be forgotten before it has landed.
+        var left = readDirty(workDate);
+        attLab.forEach(function (l) { delete left[l.id]; });
+        writeDirty(workDate, left);
+      }
 
       // ── ONLY PUSH SESSIONS THIS USER MAY WRITE ──
       // sessions_read lets a supervisor SELECT every session row for the day,
@@ -666,9 +699,16 @@
     }
 
     if (role === 'supervisor' || role === 'rm' || role === 'owner') {
+      // ── EACH ROW CARRIES ITS OWN DATE ──
+      // These two tables upsert on `id`, so stamping a single global
+      // `workDate` onto every row did not merely mislabel them — it MOVED an
+      // existing row from the day it was recorded on to the day the device
+      // happened to be showing, deleting it from the first. Falling back to
+      // workDate keeps rows created in this session (which have no date yet)
+      // on the open day.
       var rawRows = (S.rawLog || []).map(function (r) {
         return {
-          id: r.id, work_date: workDate, stage: r.stage, rm_name: r.name,
+          id: r.id, work_date: r.date || workDate, stage: r.stage, rm_name: r.name,
           unit: r.unit, qty: Number(r.qty) || 0,
           unit_price: Number(r.unitPrice) || 0,
           cost: Number(r.cost) || 0, logged_by: r.loggedBy || uid
@@ -678,7 +718,7 @@
 
       var xferRows = (S.fgTransfers || []).map(function (t) {
         return {
-          id: t.id, work_date: workDate, product: t.product,
+          id: t.id, work_date: t.date || workDate, product: t.product,
           from_stage: t.from, to_stage: t.to,
           qty: Number(t.qty) || 0, logged_by: t.loggedBy || uid
         };
@@ -722,6 +762,65 @@
     dot(outbox().length ? 'err' : 'ok');
   }
 
+  // ── WHOSE ATTENDANCE THIS DEVICE MAY SPEAK FOR ──
+  // Worker ids marked on this device and not yet pushed, scoped to the day
+  // they were marked on.
+  //
+  // Held in localStorage, not in a variable: a supervisor who marks the line
+  // present and then reloads (or is reloaded by the PWA) would otherwise lose
+  // the claim while the marks themselves survive in the state blob, and those
+  // marks would never reach Postgres.
+  var ATT_DIRTY_KEY = '_att_dirty';
+  function readDirty(workDate) {
+    try {
+      var raw = global.localStorage.getItem(ATT_DIRTY_KEY);
+      if (!raw) return {};
+      var box = JSON.parse(raw);
+      // Scoped to a date so yesterday's claims cannot be asserted against today.
+      if (!box || box.date !== workDate) return {};
+      return box.ids || {};
+    } catch (e) { return {}; }
+  }
+  function writeDirty(workDate, ids) {
+    try {
+      global.localStorage.setItem(ATT_DIRTY_KEY,
+        JSON.stringify({ date: workDate, ids: ids }));
+    } catch (e) {}
+  }
+  function markAttendanceDirty(id, workDate) {
+    if (id === undefined || id === null) return;
+    var d = workDate || null;
+    var ids = readDirty(d);
+    ids[id] = true;
+    writeDirty(d, ids);
+  }
+
+  // ── IS THIS DEVICE'S CLOCK RIGHT? ──────────────────────────────
+  // Every work_date the app writes comes from the DEVICE clock, and lands in a
+  // Postgres `date` column that the monthly reports group by. A phone with the
+  // wrong date files a real shift under the wrong day and nothing says so.
+  //
+  // The app cannot fix the clock, so it reports the disagreement instead.
+  // Null when the check could not run (offline, or the function is not
+  // deployed yet) — never guessed, because a wrong "all clear" is worse than
+  // no answer.
+  var clockSkew = null;
+  async function checkClock(deviceToday) {
+    if (!ready) return null;
+    try {
+      var res = await sb.rpc('server_today');
+      if (res.error || !res.data) return null;
+      var server = String(res.data).slice(0, 10);
+      clockSkew = (server === deviceToday) ? null : { device: deviceToday, server: server };
+      if (clockSkew) {
+        console.error('[FactoryDB] this device thinks today is ' + deviceToday +
+                      ', the server says ' + server +
+                      ' — work would be filed under the wrong day');
+      }
+      return clockSkew;
+    } catch (e) { return null; }
+  }
+
   // ── SAVE DAY ────────────────────────────────────────────────────
   // One row per day. No 1 MiB ceiling, unlike the old ledger[] array.
   async function saveDay(workDate, payload) {
@@ -740,8 +839,12 @@
     stopSync();
     onRemoteChange = onUpdate;
 
+    // day_ledger is watched too. Without it, one device closing the day was
+    // invisible everywhere else: the other devices kept the day open, kept
+    // accepting production against it, and kept pushing rows for a day the
+    // factory had already closed and reported.
     var watch = ['attendance', 'production_sessions', 'raw_log',
-                 'fg_transfers', 'fg_stock', 'factory_doc'];
+                 'fg_transfers', 'fg_stock', 'factory_doc', 'day_ledger'];
 
     var ch = sb.channel('factory-live');
     watch.forEach(function (table) {
@@ -786,12 +889,15 @@
     flushOutbox: flushOutbox,
     pendingWrites: function () { return outbox().length; },
     lastPullOk: function () { return lastPullOk; },
+    checkClock: checkClock,
+    clockSkew: function () { return clockSkew; },
     lastWriteError: function () { return lastWriteError; },
     isReady: function () { return ready; },
     role: function () { return currentRole; },
     user: function () { return currentUser; },
     client: function () { return sb; },
-    setSyncDot: dot
+    setSyncDot: dot,
+    markAttendanceDirty: markAttendanceDirty
   };
 
 })(window);

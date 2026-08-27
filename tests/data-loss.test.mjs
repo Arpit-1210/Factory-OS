@@ -147,7 +147,9 @@ describe('closing the day', () => {
     const ledgerRows = rowsFor(sb, 'day_ledger');
     assert.equal(ledgerRows.length, 1, 'the closed day must reach day_ledger');
     assert.equal(ledgerRows[0].work_date, '2026-08-19');
-    assert.equal(h.localStorage.getItem('_day_cleared_2026-08-19'), '1');
+    // The close is recorded in the ledger and in day_ledger, both checked
+    // above. No per-device localStorage flag is written any more.
+    assert.equal(h.localStorage.getItem('_day_cleared_2026-08-19'), null);
   });
 });
 
@@ -321,6 +323,9 @@ describe('push respects row ownership', () => {
       workDate: '2026-08-19', rm: [], fg: [], rawLog: [], fgTransfers: [], fgStock: {}, sessions: [],
       lab: [{ id: 1, name: 'R', role: 'Floor worker', wage: 600, present: true, doingOT: false, otHours: 0 }],
     };
+    // Claim the worker, as the UI does on every attendance toggle: push()
+    // only writes rows for workers this device has marked.
+    DB.markAttendanceDirty(1, S.workDate);
     await DB.push(S, 'supervisor');
 
     assert.equal(DB.pendingWrites(), 0, 'a write the server will never accept must not be queued');
@@ -415,42 +420,147 @@ describe('removing a row removes it on the server too', () => {
 // ══════════════════════════════════════════════════════════════════
 //  4. THE WIPE FLAGS MUST BE CONSUMED
 // ══════════════════════════════════════════════════════════════════
-describe('the day-cleared flags are consumed, not left armed', () => {
-  test('a stale _day_cleared_ flag fires once and is then cleared', () => {
-    // This flag is also written for TODAY when someone signs in against a past
-    // date. It was never removed, so one such login made every reload for the
-    // rest of the day clear attendance and sessions before the pull could
-    // restore them — the "attendance disappears after refresh" report.
-    const today = new Date();
-    const iso = today.getFullYear() + '-' +
-                String(today.getMonth() + 1).padStart(2, '0') + '-' +
-                String(today.getDate()).padStart(2, '0');
+describe('the old day-cleared flags are inert', () => {
+  // These two flags are gone. They were a per-device, unsynced opinion about
+  // which days were closed, sitting alongside the ledger and disagreeing with
+  // it: device B never learned that device A had closed a day, and
+  // `_last_saved_date` stayed armed one load too long — so the second reload
+  // after Save Day silently discarded work re-entered on that day and then
+  // pushed the emptied state to Postgres.
+  //
+  // Existing installs still carry the keys, so what matters now is that they
+  // cannot do anything.
+  const isoToday = () => {
+    const t = new Date();
+    return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' +
+           String(t.getDate()).padStart(2, '0');
+  };
 
+  test('a leftover _day_cleared_ flag does not wipe a live day', () => {
+    const iso = isoToday();
     const h = boot({ localStorageSeed: {
       frp_factory_v5: JSON.stringify({
         workDate: iso,
+        ledger: [],
         lab: [{ id: 1, name: 'R', role: 'w', wage: 600, present: true, doingOT: false, otHours: 0 }],
-        sessions: [{ supId: 1, supName: 'R', teams: [] }],
+        sessions: [{ supId: 1, supName: 'R', date: iso, teams: [] }],
       }),
       ['_day_cleared_' + iso]: '1',
     } });
 
-    assert.equal(h.localStorage.getItem('_day_cleared_' + iso), null,
-      'the flag must be removed once it has done its job');
+    const S = getState(h.ctx);
+    assert.equal(S.workDate, iso);
+    assert.equal(S.sessions.length, 1, "a stale flag must not clear the open day's work");
+    assert.equal(S.lab[0].present, true, 'nor its attendance');
   });
 
-  test('_last_saved_date does not re-arm itself', () => {
-    const today = new Date();
-    const iso = today.getFullYear() + '-' +
-                String(today.getMonth() + 1).padStart(2, '0') + '-' +
-                String(today.getDate()).padStart(2, '0');
-
+  test('a leftover _last_saved_date does not wipe a live day', () => {
+    const iso = isoToday();
     const h = boot({ localStorageSeed: {
-      frp_factory_v5: JSON.stringify({ workDate: iso, lab: [], sessions: [] }),
+      frp_factory_v5: JSON.stringify({
+        workDate: iso,
+        ledger: [],
+        lab: [{ id: 1, name: 'R', role: 'w', wage: 600, present: true, doingOT: false, otHours: 0 }],
+        sessions: [{ supId: 1, supName: 'R', date: iso, teams: [] }],
+      }),
       _last_saved_date: iso,
     } });
 
-    assert.equal(h.localStorage.getItem('_last_saved_date'), null,
-      'once consumed it must not match again on the next load and wipe the new day');
+    const S = getState(h.ctx);
+    assert.equal(S.sessions.length, 1);
+    assert.equal(S.lab[0].present, true);
+  });
+
+  test('stale flags are purged so they cannot accumulate', () => {
+    const iso = isoToday();
+    const h = boot({ localStorageSeed: {
+      frp_factory_v5: JSON.stringify({ workDate: iso, ledger: [], lab: [], sessions: [] }),
+      '_day_cleared_2026-01-01': '1',
+      '_day_cleared_2026-01-02': '1',
+      _last_saved_date: '2026-01-02',
+    } });
+
+    assert.equal(h.localStorage.getItem('_day_cleared_2026-01-01'), null);
+    assert.equal(h.localStorage.getItem('_day_cleared_2026-01-02'), null);
+    assert.equal(h.localStorage.getItem('_last_saved_date'), null);
+  });
+});
+
+describe('attendance is not last-writer-wins across devices', () => {
+  // Every device used to push a row for EVERY worker, upserting on
+  // (work_date, worker_id). attendance is multi-writer, so whichever device
+  // pushed last overwrote the others' marks with its own view: a phone that
+  // had been in a pocket since morning set the whole factory absent.
+  const lab = (marks) => [1, 2, 3].map(id => ({
+    id, name: 'W' + id, role: 'Floor worker', wage: 400,
+    present: !!marks[id], doingOT: false, otHours: 0,
+  }));
+
+  const state = (marks) => ({
+    workDate: '2026-08-19', lab: lab(marks),
+    rm: [], fg: [], sessions: [], rawLog: [], fgTransfers: [], fgStock: {},
+  });
+
+  test('a device writes only the workers it marked', async () => {
+    const sb = fakeSupabase();
+    const h = bootDb({ supabase: sb });
+    const DB = h.win.FactoryDB;
+    await DB.init();
+
+    // This supervisor marked worker 2 only. Workers 1 and 3 are someone
+    // else's line, and this device happens to believe both are absent.
+    const S = state({ 2: true });
+    DB.markAttendanceDirty(2, S.workDate);
+    await DB.push(S, 'supervisor');
+
+    const rows = rowsFor(sb, 'attendance');
+    assert.deepEqual(rows.map(r => r.worker_id), [2],
+      'the untouched workers are left exactly as the server has them');
+    assert.equal(rows[0].present, true);
+  });
+
+  test('a device that marked nobody writes no attendance at all', async () => {
+    const sb = fakeSupabase();
+    const h = bootDb({ supabase: sb });
+    const DB = h.win.FactoryDB;
+    await DB.init();
+
+    await DB.push(state({}), 'supervisor');
+
+    assert.equal(rowsFor(sb, 'attendance').length, 0,
+      'a stale device must not assert absence for the whole factory');
+  });
+
+  test('a claim survives a reload', async () => {
+    // The claim lives in localStorage, not in a variable: a supervisor who
+    // marks the line and is then reloaded by the PWA keeps the marks in the
+    // state blob, and they must still be pushable.
+    const seed = {};
+    const first = bootDb({ supabase: fakeSupabase(), localStorageSeed: seed });
+    await first.win.FactoryDB.init();
+    first.win.FactoryDB.markAttendanceDirty(2, '2026-08-19');
+
+    // Carry this device's localStorage across the reload.
+    const carried = first.localStorage._dump();
+
+    const sb = fakeSupabase();
+    const second = bootDb({ supabase: sb, localStorageSeed: carried });
+    await second.win.FactoryDB.init();
+    await second.win.FactoryDB.push(state({ 2: true }), 'supervisor');
+
+    assert.deepEqual(rowsFor(sb, 'attendance').map(r => r.worker_id), [2]);
+  });
+
+  test('a claim does not carry to another day', async () => {
+    const sb = fakeSupabase();
+    const h = bootDb({ supabase: sb });
+    const DB = h.win.FactoryDB;
+    await DB.init();
+
+    DB.markAttendanceDirty(2, '2026-08-18');          // marked yesterday
+    await DB.push(state({ 2: true }), 'supervisor');   // pushing today
+
+    assert.equal(rowsFor(sb, 'attendance').length, 0,
+      "yesterday's claim says nothing about today");
   });
 });

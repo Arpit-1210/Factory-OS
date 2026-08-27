@@ -68,11 +68,20 @@ function fakeSupabase({ session = null, role = null, active = true } = {}) {
 
 describe('realtime is actually enabled server-side', () => {
   // The client half was never the problem; the publication was.
-  const MIGRATION = fs.readFileSync(
-    path.join(ROOT, 'supabase/migrations/0004_enable_realtime.sql'), 'utf8');
+  // EVERY migration, not one named file. Pinning 0004 meant a table published
+  // by a later migration read as unpublished — and, worse, that a table added
+  // to the client's watch list with no migration at all would only be caught
+  // if someone remembered to edit 0004 specifically.
+  const MIGRATION = fs.readdirSync(path.join(ROOT, 'supabase/migrations'))
+    .filter(f => f.endsWith('.sql'))
+    .map(f => fs.readFileSync(path.join(ROOT, 'supabase/migrations', f), 'utf8'))
+    .join('\n');
 
   const WATCHED = ['attendance', 'production_sessions', 'raw_log',
-                   'fg_transfers', 'fg_stock', 'factory_doc'];
+                   'fg_transfers', 'fg_stock', 'factory_doc',
+                   // Closing a day writes one row, to this table. Unwatched,
+                   // one device closing the day was invisible to the others.
+                   'day_ledger'];
 
   test('every table the client subscribes to is added to the publication', async () => {
     const sb = fakeSupabase();
@@ -85,7 +94,7 @@ describe('realtime is actually enabled server-side', () => {
       'the client subscribes to exactly these tables');
 
     for (const t of subscribed) {
-      assert.match(MIGRATION, new RegExp(`'${t}'`),
+      assert.match(MIGRATION, new RegExp('(^|[^a-z_])' + t + '([^a-z_]|$)'),
         `${t} is subscribed but never added to supabase_realtime — ` +
         'the channel would report SUBSCRIBED and receive nothing');
     }
@@ -153,5 +162,65 @@ describe('a reload does not sign the user out', () => {
   test('restoring is refused before the data layer is ready', async () => {
     const h = boot();   // no supabase global at all
     assert.equal(await h.win.restoreSession(), false);
+  });
+});
+
+describe('a day closed on another device is acted on, not just received', () => {
+  // day_ledger was added to the realtime watch list, but the callback
+  // startFirebaseSync() registers did its own setS() and repaint and never
+  // reconciled — so the event arrived, the pull ran, and nothing happened.
+  // The table was watched to no purpose. This covers the callback itself.
+  const captureCallback = async () => {
+    const h = boot({ supabase: fakeSupabase({ role: 'owner' }) });
+    await h.win.FactoryDB.init();
+    h.win.setFbEnabled(true);
+    h.win.setRole('owner');
+
+    let onUpdate = null;
+    h.win.FactoryDB.startSync = (_S, _role, cb) => { onUpdate = cb; };
+    h.win.startFirebaseSync();
+    assert.ok(onUpdate, 'startFirebaseSync must register a callback');
+    return { h, onUpdate };
+  };
+
+  test('the open day flips to a closed day when its ledger row arrives', async () => {
+    const { h, onUpdate } = await captureCallback();
+
+    // What the pull produces after another device closed 2026-08-19: the
+    // ledger row has arrived, and the day's operational rows are still there.
+    onUpdate({
+      workDate: '2026-08-19',
+      ledger: [{
+        date: '2026-08-19',
+        sessions: [{ supId: 9, supName: 'Karan', supWage: 800, teams: [] }],
+        attendance: [], rawLog: [],
+      }],
+      sessions: [
+        { supId: 9, supName: 'Karan', date: '2026-08-19', teams: [] },
+        { supId: 8, supName: 'Leftover', date: '2026-08-19', teams: [] },
+      ],
+      lab: [], rawLog: [], fgTransfers: [], fgStock: {},
+    }, 'owner');
+
+    const S = h.win.S;
+    assert.equal(S.reopenDate, '2026-08-19',
+      'the day is now a closed day being viewed, not today’s work');
+    assert.deepEqual(S.sessions.map(s => s.supName), ['Karan'],
+      'the ledger entry replaces the leftover operational rows');
+  });
+
+  test('an ordinary remote change leaves an open day alone', async () => {
+    const { h, onUpdate } = await captureCallback();
+
+    onUpdate({
+      workDate: '2026-08-19',
+      ledger: [],
+      sessions: [{ supId: 9, supName: 'Karan', date: '2026-08-19', teams: [] }],
+      lab: [], rawLog: [], fgTransfers: [], fgStock: {},
+    }, 'owner');
+
+    const S = h.win.S;
+    assert.ok(!S.reopenDate);
+    assert.equal(S.sessions.length, 1);
   });
 });

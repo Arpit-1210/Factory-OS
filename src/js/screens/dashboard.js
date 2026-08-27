@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { calcOT, getFGBalance, isOverdue } from '../core/calc.js';
+import { calcOT, closedDaysExcludingOpen, getFGBalance, isOverdue } from '../core/calc.js';
 import { STAGES } from '../core/config.js';
 import { fmt, todayStr } from '../core/format.js';
 import { currentRole } from '../core/session.js';
@@ -260,7 +260,8 @@ export function renderTaskBoard(){
       producedToday[key]=(producedToday[key]||0)+p.qty;
     });
   }));
-  S.ledger.forEach(day=>(day.sessions||[]).forEach(ss=>(ss.teams||[]).forEach(t=>{
+  // Excludes the open day, which S.sessions above has already counted.
+  closedDaysExcludingOpen().forEach(day=>(day.sessions||[]).forEach(ss=>(ss.teams||[]).forEach(t=>{
     if(t.stage!=='Packing') return;
     (t.production||[]).forEach(p=>{
       const key=(p.baseName||p.name).toLowerCase().trim();

@@ -142,8 +142,28 @@ describe('saveDay — writing the day into the ledger', () => {
     assert.deepEqual(plain(S.rawLog), []);
     assert.equal(S.lab[0].present, false, 'attendance is reset for the new day');
     assert.equal(S.lab[0].otHours, 0);
-    assert.equal(localStorage.getItem('_day_cleared_2026-08-19'), '1');
-    assert.equal(localStorage.getItem('_last_saved_date'), '2026-08-19');
+    // The day is recorded as closed in the LEDGER, not in per-device
+    // localStorage flags. The old `_day_cleared_<date>` / `_last_saved_date`
+    // pair was unsynced (device B never learned the day was closed) and
+    // `_last_saved_date` stayed armed one load too long, wiping work
+    // re-entered on that day and then pushing the wipe.
+    assert.ok(S.ledger.some(e => e.date === '2026-08-19'), 'the ledger records the close');
+    assert.equal(localStorage.getItem('_day_cleared_2026-08-19'), null);
+    assert.equal(localStorage.getItem('_last_saved_date'), null);
+    assert.equal(S.reopenDate, null);
+  });
+
+  test('advances past a day that is already closed', () => {
+    // Re-closing an old day used to land on the calendar day after it, which
+    // is usually closed too — so the app opened a day belonging to history and
+    // showed its production as today's.
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.ledger = [{ date: '2026-08-20' }, { date: '2026-08-21' }];
+    S.lab = [worker(1, 'A', 400, { present: true })];
+
+    call(ctx, 'saveDay()');
+
+    assert.equal(S.workDate, '2026-08-22', 'skips the closed days entirely');
   });
 
   test('rolls over a month end correctly', () => {
@@ -184,23 +204,35 @@ describe('saveDay — writing the day into the ledger', () => {
 });
 
 describe('isDaySaved', () => {
-  test('the current working day is never "already saved"', () => {
-    // Otherwise the open day would be pruned out from under the supervisor.
+  // This predicate now answers from the ledger and nothing else: no
+  // localStorage, no writes, and no special case for the open day.
+  test('a day present in the ledger is saved, whether or not it is the open one', () => {
+    // It used to return false for S.workDate on the reasoning that "the open
+    // day can never be already saved". That was untrue the moment a closed day
+    // was reopened for editing, and the branch also DELETED that day's
+    // closed-marker as a side effect of being asked the question.
     const S = resetState(ctx, { workDate: '2026-08-19' });
-    S.ledger = [{ date: '2026-08-19' }];
-    assert.equal(call(ctx, 'isDaySaved("2026-08-19")'), false);
-  });
-
-  test('a past day present in the ledger is saved', () => {
-    const S = resetState(ctx, { workDate: '2026-08-19' });
-    S.ledger = [{ date: '2026-08-18' }];
+    S.ledger = [{ date: '2026-08-19' }, { date: '2026-08-18' }];
+    assert.equal(call(ctx, 'isDaySaved("2026-08-19")'), true, 'the open day, if closed, is closed');
     assert.equal(call(ctx, 'isDaySaved("2026-08-18")'), true);
   });
 
-  test('a past day flagged in localStorage is saved even without a ledger row', () => {
+  test('asking is free of side effects', () => {
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.ledger = [{ date: '2026-08-19' }];
+    const before = JSON.stringify(plain(S.ledger));
+    call(ctx, 'isDaySaved("2026-08-19")');
+    call(ctx, 'isDaySaved("2026-08-19")');
+    assert.equal(JSON.stringify(plain(S.ledger)), before);
+  });
+
+  test('localStorage no longer gets a vote', () => {
+    // `_day_cleared_<date>` was a per-device, unsynced second opinion that
+    // never expired: device B disagreed with device A about the same day.
     resetState(ctx, { workDate: '2026-08-19' });
     localStorage.setItem('_day_cleared_2026-08-17', '1');
-    assert.equal(call(ctx, 'isDaySaved("2026-08-17")'), true);
+    assert.equal(call(ctx, 'isDaySaved("2026-08-17")'), false,
+      'only the ledger decides whether a day is closed');
     localStorage.removeItem('_day_cleared_2026-08-17');
   });
 
@@ -208,6 +240,93 @@ describe('isDaySaved', () => {
     resetState(ctx, { workDate: '2026-08-19' });
     assert.equal(call(ctx, 'isDaySaved("2026-01-01")'), false);
     assert.equal(!!call(ctx, 'isDaySaved(undefined)'), false);
+  });
+});
+
+describe('nextOpenDate — never land on a day that is already closed', () => {
+  test('returns the date itself when it is open', () => {
+    resetState(ctx, { workDate: '2026-08-19' });
+    assert.equal(call(ctx, 'nextOpenDate("2026-08-19")'), '2026-08-19');
+  });
+
+  test('walks forward over a run of closed days', () => {
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.ledger = [{ date: '2026-08-19' }, { date: '2026-08-20' }, { date: '2026-08-21' }];
+    assert.equal(call(ctx, 'nextOpenDate("2026-08-19")'), '2026-08-22');
+  });
+});
+
+describe('openWorkDate — the only way the work date moves', () => {
+  test('refuses a closed day unless the caller is explicit', () => {
+    // Landing on a closed day implicitly — a rollover, a stale stored date
+    // snapping back — must NOT open it. That is what put a closed day's
+    // production back under Today's Production.
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.ledger = [{ date: '2026-08-18', sessions: [] }];
+
+    assert.equal(call(ctx, 'openWorkDate("2026-08-18")'), false);
+    assert.equal(S.workDate, '2026-08-19', 'the date did not move');
+  });
+
+  test('opens a closed day on request, loading it from the ledger', () => {
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.ledger = [{
+      date: '2026-08-18',
+      sessions: [session(9, 'Karan', 800, [])],
+      rawLog: [{ id: 1, stage: 'Moulding', name: 'Resin', qty: 1, cost: 220 }],
+      attendance: [{ id: 1, present: true, doingOT: false, otHours: 0 }],
+    }];
+    S.lab = [worker(1, 'A', 400, {})];
+
+    assert.equal(call(ctx, 'openWorkDate("2026-08-18", {reopen:true})'), true);
+    assert.equal(S.workDate, '2026-08-18');
+    assert.equal(S.reopenDate, '2026-08-18', 'marked as a closed day being edited');
+    assert.equal(S.sessions.length, 1, "the day's own production, from the ledger");
+    assert.equal(S.rawLog.length, 1);
+    assert.equal(S.lab[0].present, true, "and the day's own attendance");
+  });
+
+  test('an open past day is entered empty, for the pull to fill', () => {
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.sessions = [Object.assign(session(9, 'Karan', 800, []), { date: '2026-08-19' })];
+    S.lab = [worker(1, 'A', 400, { present: true })];
+
+    assert.equal(call(ctx, 'openWorkDate("2026-08-18")'), true);
+    assert.equal(S.workDate, '2026-08-18');
+    assert.equal(S.reopenDate, null);
+    // The old header-picker handler left these in place and pushed them, which
+    // re-stamped one day's work onto another date.
+    assert.equal(S.sessions.length, 0, "the previous day's work is not carried over");
+    assert.equal(S.lab[0].present, false);
+  });
+});
+
+describe('reconcileOpenDay — the ledger wins over stale live rows', () => {
+  test('a day that turns out to be closed renders from its ledger entry', () => {
+    // Closing a day writes day_ledger but does not delete that day's
+    // production_sessions / attendance rows, so a pull loads them and they
+    // read as live work. This is the "yesterday's production is still showing
+    // as today's" report, and it also covers another device closing the day.
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.ledger = [{ date: '2026-08-19', sessions: [session(9, 'Karan', 800, [])], attendance: [] }];
+    S.sessions = [
+      Object.assign(session(9, 'Karan', 800, []), { date: '2026-08-19' }),
+      Object.assign(session(8, 'Stale', 800, []), { date: '2026-08-19' }),
+    ];
+
+    assert.equal(call(ctx, 'reconcileOpenDay()'), true);
+    assert.equal(S.reopenDate, '2026-08-19');
+    assert.deepEqual(plain(S.sessions).map(s => s.supName), ['Karan'],
+      'the ledger entry replaces whatever the pull loaded');
+  });
+
+  test('leaves an open day alone', () => {
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.sessions = [Object.assign(session(9, 'Karan', 800, []), { date: '2026-08-19' })];
+
+    assert.equal(call(ctx, 'reconcileOpenDay()'), false);
+    assert.ok(!S.reopenDate);
+    assert.equal(S.sessions.length, 1);
   });
 });
 
@@ -224,66 +343,26 @@ describe('adoptWorkDate — moving to a new working day', () => {
     assert.equal(S.lab[0].otHours, 0);
   });
 
-  test('carries unsaved in-progress work forward onto the new date', () => {
-    // A supervisor mid-shift at midnight must not lose the session they are
-    // still entering.
+  test('starts the new day empty', () => {
+    // It used to carry "unsaved" work forward and RE-STAMP it with the new
+    // date. Its only caller is checkDayRollover(), which fires solely when the
+    // old day is closed — so everything it carried forward was production
+    // already in the ledger, and the ledger then held it twice. A genuine
+    // mid-shift session is protected by checkDayRollover() declining to move
+    // at all (see below), not by re-dating it.
     const S = resetState(ctx, { workDate: '2026-08-19' });
-    S.sessions = [Object.assign(session(9, 'Karan', 800, []), { date: '2026-08-19' })];
+    S.ledger = [{ date: '2026-08-19' }];
+    S.sessions = [
+      Object.assign(session(9, 'Karan', 800, []), { date: '2026-08-19' }),
+      Object.assign(session(7, 'Undated', 800, []), {}),
+    ];
     S.rawLog = [{ id: 1, date: '2026-08-19', stage: 'Moulding', name: 'Resin', qty: 1, cost: 220 }];
 
     call(ctx, 'adoptWorkDate("2026-08-20")');
 
-    assert.equal(S.sessions.length, 1, 'unsaved session survives the rollover');
-    assert.equal(S.sessions[0].date, '2026-08-20', 'and is re-dated to the new day');
-    assert.equal(S.rawLog.length, 1);
-    assert.equal(S.rawLog[0].date, '2026-08-20');
-  });
-
-  test('drops work belonging to a day that was already saved', () => {
-    const S = resetState(ctx, { workDate: '2026-08-19' });
-    S.ledger = [{ date: '2026-08-18' }];
-    S.sessions = [
-      Object.assign(session(9, 'Karan', 800, []), { date: '2026-08-18' }),   // in the ledger
-      Object.assign(session(8, 'Rahul', 800, []), { date: '2026-08-19' }),   // still open
-      Object.assign(session(7, 'Vikas', 800, []), {}),                       // no date at all
-    ];
-
-    // One argument: nothing has just been saved, so only the ledgered day goes.
-    call(ctx, 'adoptWorkDate("2026-08-20")');
-
-    assert.deepEqual(plain(S.sessions).map(s => s.supName), ['Rahul', 'Vikas'],
-      'unsaved and undated work is carried forward, ledgered work is not');
-    assert.deepEqual(plain(S.sessions).map(s => s.date), ['2026-08-20', '2026-08-20']);
-  });
-
-  test('told a day was just saved, it drops the work from that day too', () => {
-    // Carrying it forward would replay production already in the ledger, and
-    // getFGBalance() counts both the open day and history — so it would be
-    // added to stock twice.
-    const S = resetState(ctx, { workDate: '2026-08-19' });
-    S.sessions = [
-      Object.assign(session(8, 'Rahul', 800, []), { date: '2026-08-19' }),
-      Object.assign(session(7, 'Vikas', 800, []), { date: '2026-08-20' }),
-    ];
-
-    call(ctx, 'adoptWorkDate("2026-08-20", "2026-08-19")');
-
-    assert.deepEqual(plain(S.sessions).map(s => s.supName), ['Vikas']);
-  });
-
-  // Regression guard. adoptWorkDate() wrote _day_cleared_<savedDate>, then
-  // filtered sessions through isDaySaved() while S.workDate was still the OLD
-  // date — hitting its "the open day is never saved" branch, whose side effect
-  // DELETED the flag just written. Moving the reassignment above the filters
-  // fixes it, and stops saved production being carried into the new day.
-  test('flags the day it was told was saved', () => {
-    const S = resetState(ctx, { workDate: '2026-08-19' });
-    S.sessions = [Object.assign(session(8, 'Rahul', 800, []), { date: '2026-08-19' })];
-
-    call(ctx, 'adoptWorkDate("2026-08-20", "2026-08-19")');
-
-    assert.equal(localStorage.getItem('_day_cleared_2026-08-19'), '1',
-      'the day just saved must stay flagged so it is never re-adopted');
+    assert.equal(S.sessions.length, 0, 'no production crosses into the new day');
+    assert.equal(S.rawLog.length, 0);
+    assert.equal(S.reopenDate, null);
   });
 
   test('persists the new date to localStorage', () => {
@@ -341,5 +420,53 @@ describe('checkDayRollover — the overnight auto-advance', () => {
     const { timers } = boot();
     assert.ok(timers.intervals.some(t => t.ms === 60000),
       'a 60s rollover check must be installed at boot');
+  });
+});
+
+describe('reopening a closed day and saving it again is lossless', () => {
+  // Re-closing a day overwrites its ledger entry (`onConflict: work_date`), so
+  // whatever is in memory at that moment becomes the whole day. Before the
+  // lifecycle fix a day could be re-closed while memory held only part of it —
+  // or, after an accidental rollover, held the NEXT day's work — and the
+  // earlier shift was gone from history with nothing to recover it from.
+  test('a reopen/save round trip preserves the day', () => {
+    const S = resetState(ctx, { workDate: '2026-08-20' });
+    S.lab = [worker(1, 'A', 400, {}), worker(2, 'B', 500, {})];
+    S.ledger = [{
+      date: '2026-08-19',
+      sessions: [session(9, 'Karan', 800, [team(1, 'Moulding', [], [{ name: 'Chair', qty: 7, value: 7000, unitVal: 1000 }])])],
+      rawLog: [{ id: 1, stage: 'Moulding', name: 'Resin', qty: 4, unitPrice: 220, cost: 880 }],
+      attendance: [
+        { id: 1, present: true, doingOT: true, otHours: 2 },
+        { id: 2, present: false, doingOT: false, otHours: 0 },
+      ],
+      goodsValue: 7000,
+    }];
+
+    call(ctx, 'openWorkDate("2026-08-19", {reopen:true})');
+    call(ctx, 'saveDay()');
+
+    const entry = S.ledger.find(e => e.date === '2026-08-19');
+    assert.ok(entry, 'the day is still in the ledger');
+    assert.equal(entry.goodsValue, 7000, 'its production survived the round trip');
+    assert.equal(entry.rawLog.length, 1, 'and its raw log');
+    assert.equal(entry.attendance.filter(a => a.present).length, 1,
+      'and its attendance');
+    assert.equal(S.ledger.filter(e => e.date === '2026-08-19').length, 1,
+      're-closing must not duplicate the day');
+  });
+
+  test('the day stays closed and the app moves on afterwards', () => {
+    const S = resetState(ctx, { workDate: '2026-08-20' });
+    S.lab = [worker(1, 'A', 400, {})];
+    S.ledger = [{ date: '2026-08-19', sessions: [], rawLog: [], attendance: [] }];
+
+    call(ctx, 'openWorkDate("2026-08-19", {reopen:true})');
+    assert.equal(S.reopenDate, '2026-08-19');
+
+    call(ctx, 'saveDay()');
+
+    assert.equal(S.reopenDate, null, 'no longer editing a past day');
+    assert.notEqual(S.workDate, '2026-08-19', 'and not sitting on the day just closed');
   });
 });

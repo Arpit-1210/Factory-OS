@@ -99,6 +99,22 @@ export function renderOTTab(){
     }).join('')}</tbody>
   </table>`;
 }
+/**
+ * Claim a worker's attendance for this device.
+ *
+ * push() only writes rows for workers marked here. Without that, every device
+ * pushed a row for every worker on every push, so whichever device pushed last
+ * overwrote the others' marks with its own view — one phone left in a pocket
+ * since morning could set the whole factory absent for the day.
+ */
+function claim(id){
+  // The work date is passed explicitly. `S` is a module binding and is no
+  // longer on `window`, so the data layer cannot read it for itself.
+  if(typeof FactoryDB!=='undefined' && FactoryDB.markAttendanceDirty){
+    FactoryDB.markAttendanceDirty(id, S.workDate);
+  }
+}
+
 // The delegated layer passes the event as the trailing argument, so the
 // value is read from the element rather than baked into the markup.
 export function setOTHours(id, ev){
@@ -108,21 +124,23 @@ export function setOTHours(id, ev){
   l.otHours = parseFloat(val)||0;
   if(l.otHours > 0) l.doingOT = true;
   else l.doingOT = false;
+  claim(id);
   persist();
   renderOTTab();
   updAttMet();
 }
-export function togAtt(id){const l=S.lab.find(l=>l.id===id);l.present^=1;if(!l.present){l.doingOT=false;l.otHours=0;}persist();renderAtt();if(typeof pushAttendanceLive==="function")pushAttendanceLive();}
+export function togAtt(id){const l=S.lab.find(l=>l.id===id);l.present^=1;if(!l.present){l.doingOT=false;l.otHours=0;}claim(id);persist();renderAtt();if(typeof pushAttendanceLive==="function")pushAttendanceLive();}
 export function togOT(id){
   const l=S.lab.find(l=>l.id===id);
   if(!l) return;
   l.doingOT^=1;
   if(!l.doingOT) l.otHours=0;
+  claim(id);
   persist();
   renderOTTab();
   updAttMet();
 }
-export function markAll(v){S.lab.forEach(l=>{l.present=!!v;if(!v){l.doingOT=false;l.otHours=0;}});persist();renderAtt();if(typeof pushAttendanceLive==="function")pushAttendanceLive();}
+export function markAll(v){S.lab.forEach(l=>{l.present=!!v;if(!v){l.doingOT=false;l.otHours=0;}claim(l.id);});persist();renderAtt();if(typeof pushAttendanceLive==="function")pushAttendanceLive();}
 export function updAttMet(){
   const p=S.lab.filter(l=>l.present);
   const bw=p.reduce((a,l)=>a+l.wage,0);
