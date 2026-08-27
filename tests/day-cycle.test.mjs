@@ -422,3 +422,51 @@ describe('checkDayRollover — the overnight auto-advance', () => {
       'a 60s rollover check must be installed at boot');
   });
 });
+
+describe('reopening a closed day and saving it again is lossless', () => {
+  // Re-closing a day overwrites its ledger entry (`onConflict: work_date`), so
+  // whatever is in memory at that moment becomes the whole day. Before the
+  // lifecycle fix a day could be re-closed while memory held only part of it —
+  // or, after an accidental rollover, held the NEXT day's work — and the
+  // earlier shift was gone from history with nothing to recover it from.
+  test('a reopen/save round trip preserves the day', () => {
+    const S = resetState(ctx, { workDate: '2026-08-20' });
+    S.lab = [worker(1, 'A', 400, {}), worker(2, 'B', 500, {})];
+    S.ledger = [{
+      date: '2026-08-19',
+      sessions: [session(9, 'Karan', 800, [team(1, 'Moulding', [], [{ name: 'Chair', qty: 7, value: 7000, unitVal: 1000 }])])],
+      rawLog: [{ id: 1, stage: 'Moulding', name: 'Resin', qty: 4, unitPrice: 220, cost: 880 }],
+      attendance: [
+        { id: 1, present: true, doingOT: true, otHours: 2 },
+        { id: 2, present: false, doingOT: false, otHours: 0 },
+      ],
+      goodsValue: 7000,
+    }];
+
+    call(ctx, 'openWorkDate("2026-08-19", {reopen:true})');
+    call(ctx, 'saveDay()');
+
+    const entry = S.ledger.find(e => e.date === '2026-08-19');
+    assert.ok(entry, 'the day is still in the ledger');
+    assert.equal(entry.goodsValue, 7000, 'its production survived the round trip');
+    assert.equal(entry.rawLog.length, 1, 'and its raw log');
+    assert.equal(entry.attendance.filter(a => a.present).length, 1,
+      'and its attendance');
+    assert.equal(S.ledger.filter(e => e.date === '2026-08-19').length, 1,
+      're-closing must not duplicate the day');
+  });
+
+  test('the day stays closed and the app moves on afterwards', () => {
+    const S = resetState(ctx, { workDate: '2026-08-20' });
+    S.lab = [worker(1, 'A', 400, {})];
+    S.ledger = [{ date: '2026-08-19', sessions: [], rawLog: [], attendance: [] }];
+
+    call(ctx, 'openWorkDate("2026-08-19", {reopen:true})');
+    assert.equal(S.reopenDate, '2026-08-19');
+
+    call(ctx, 'saveDay()');
+
+    assert.equal(S.reopenDate, null, 'no longer editing a past day');
+    assert.notEqual(S.workDate, '2026-08-19', 'and not sitting on the day just closed');
+  });
+});
