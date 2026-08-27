@@ -9,3 +9,4 @@ dist/
 
 # Local Claude Code settings and launch config
 .claude/
+scratchpad/

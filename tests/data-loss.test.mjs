@@ -147,7 +147,9 @@ describe('closing the day', () => {
     const ledgerRows = rowsFor(sb, 'day_ledger');
     assert.equal(ledgerRows.length, 1, 'the closed day must reach day_ledger');
     assert.equal(ledgerRows[0].work_date, '2026-08-19');
-    assert.equal(h.localStorage.getItem('_day_cleared_2026-08-19'), '1');
+    // The close is recorded in the ledger and in day_ledger, both checked
+    // above. No per-device localStorage flag is written any more.
+    assert.equal(h.localStorage.getItem('_day_cleared_2026-08-19'), null);
   });
 });
 
@@ -415,42 +417,69 @@ describe('removing a row removes it on the server too', () => {
 // ══════════════════════════════════════════════════════════════════
 //  4. THE WIPE FLAGS MUST BE CONSUMED
 // ══════════════════════════════════════════════════════════════════
-describe('the day-cleared flags are consumed, not left armed', () => {
-  test('a stale _day_cleared_ flag fires once and is then cleared', () => {
-    // This flag is also written for TODAY when someone signs in against a past
-    // date. It was never removed, so one such login made every reload for the
-    // rest of the day clear attendance and sessions before the pull could
-    // restore them — the "attendance disappears after refresh" report.
-    const today = new Date();
-    const iso = today.getFullYear() + '-' +
-                String(today.getMonth() + 1).padStart(2, '0') + '-' +
-                String(today.getDate()).padStart(2, '0');
+describe('the old day-cleared flags are inert', () => {
+  // These two flags are gone. They were a per-device, unsynced opinion about
+  // which days were closed, sitting alongside the ledger and disagreeing with
+  // it: device B never learned that device A had closed a day, and
+  // `_last_saved_date` stayed armed one load too long — so the second reload
+  // after Save Day silently discarded work re-entered on that day and then
+  // pushed the emptied state to Postgres.
+  //
+  // Existing installs still carry the keys, so what matters now is that they
+  // cannot do anything.
+  const isoToday = () => {
+    const t = new Date();
+    return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' +
+           String(t.getDate()).padStart(2, '0');
+  };
 
+  test('a leftover _day_cleared_ flag does not wipe a live day', () => {
+    const iso = isoToday();
     const h = boot({ localStorageSeed: {
       frp_factory_v5: JSON.stringify({
         workDate: iso,
+        ledger: [],
         lab: [{ id: 1, name: 'R', role: 'w', wage: 600, present: true, doingOT: false, otHours: 0 }],
-        sessions: [{ supId: 1, supName: 'R', teams: [] }],
+        sessions: [{ supId: 1, supName: 'R', date: iso, teams: [] }],
       }),
       ['_day_cleared_' + iso]: '1',
     } });
 
-    assert.equal(h.localStorage.getItem('_day_cleared_' + iso), null,
-      'the flag must be removed once it has done its job');
+    const S = getState(h.ctx);
+    assert.equal(S.workDate, iso);
+    assert.equal(S.sessions.length, 1, "a stale flag must not clear the open day's work");
+    assert.equal(S.lab[0].present, true, 'nor its attendance');
   });
 
-  test('_last_saved_date does not re-arm itself', () => {
-    const today = new Date();
-    const iso = today.getFullYear() + '-' +
-                String(today.getMonth() + 1).padStart(2, '0') + '-' +
-                String(today.getDate()).padStart(2, '0');
-
+  test('a leftover _last_saved_date does not wipe a live day', () => {
+    const iso = isoToday();
     const h = boot({ localStorageSeed: {
-      frp_factory_v5: JSON.stringify({ workDate: iso, lab: [], sessions: [] }),
+      frp_factory_v5: JSON.stringify({
+        workDate: iso,
+        ledger: [],
+        lab: [{ id: 1, name: 'R', role: 'w', wage: 600, present: true, doingOT: false, otHours: 0 }],
+        sessions: [{ supId: 1, supName: 'R', date: iso, teams: [] }],
+      }),
       _last_saved_date: iso,
     } });
 
-    assert.equal(h.localStorage.getItem('_last_saved_date'), null,
-      'once consumed it must not match again on the next load and wipe the new day');
+    const S = getState(h.ctx);
+    assert.equal(S.sessions.length, 1);
+    assert.equal(S.lab[0].present, true);
+  });
+
+  test('stale flags are purged so they cannot accumulate', () => {
+    const iso = isoToday();
+    const h = boot({ localStorageSeed: {
+      frp_factory_v5: JSON.stringify({ workDate: iso, ledger: [], lab: [], sessions: [] }),
+      '_day_cleared_2026-01-01': '1',
+      '_day_cleared_2026-01-02': '1',
+      _last_saved_date: '2026-01-02',
+    } });
+
+    assert.equal(h.localStorage.getItem('_day_cleared_2026-01-01'), null);
+    assert.equal(h.localStorage.getItem('_day_cleared_2026-01-02'), null);
+    assert.equal(h.localStorage.getItem('_last_saved_date'), null);
   });
 });
+
