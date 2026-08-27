@@ -87,27 +87,21 @@ export function onLoginSuccess(displayName){
   // Check if user selected a past date
   const loginDate = document.getElementById('login-work-date')?.value;
   if(loginDate && loginDate !== todayStr()){
+    // Point the app at the requested day BEFORE the initial pull, so the pull
+    // fetches that day's rows rather than today's. Whether the day turns out
+    // to be closed is settled by reconcileOpenDay() once the ledger has
+    // arrived — it cannot be decided here, because S.ledger is still whatever
+    // this device had cached.
     // NOTE: this used to also write `_day_cleared_<today>` "so the Firebase
     // listener doesn't overwrite past date work". There is no Firebase
     // listener any more, and every operational table is keyed by work_date, so
     // reading a past day cannot collide with today's rows. All that flag did
     // was make loadState() wipe today's real attendance and sessions on every
     // reload for the rest of the calendar day.
-    // Load that day's data from ledger if exists
-    const pastEntry = S.ledger.find(e=>e.date===loginDate);
-    if(pastEntry){
-      S.sessions = pastEntry.sessions ? JSON.parse(JSON.stringify(pastEntry.sessions)) : [];
-      S.rawLog = pastEntry.rawLog ? [...pastEntry.rawLog] : [];
-      S.lab.forEach(l=>{
-        const att = (pastEntry.attendance||[]).find(a=>a.id===l.id);
-        if(att){ l.present=att.present; l.doingOT=att.doingOT; l.otHours=att.otHours||0; }
-        else { l.present=false; l.doingOT=false; l.otHours=0; }
-      });
-    } else {
-      S.sessions=[]; S.rawLog=[];
-      S.lab.forEach(l=>{l.present=false;l.doingOT=false;l.otHours=0;});
-    }
+    S.sessions=[]; S.rawLog=[];
+    S.lab.forEach(l=>{l.present=false;l.doingOT=false;l.otHours=0;});
     S.workDate = loginDate;
+    S.reopenDate = null;
     const wd=document.getElementById('work-date');
     if(wd) wd.value=loginDate;
   }

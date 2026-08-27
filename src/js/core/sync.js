@@ -19,6 +19,7 @@ import { todayStr } from './format.js';
 import { go, renderScreen } from './router.js';
 import { currentRole, fbEnabled, setFbEnabled } from './session.js';
 import { restoreSession } from './auth.js';
+import { reconcileOpenDay } from './day-rollover.js';
 import { S, setS } from './state.js';
 import { renderDashboard } from '../screens/dashboard.js';
 import { buildPayload } from '../screens/day.js';
@@ -87,6 +88,11 @@ export async function pushToFirebase(){
 export async function pullFromFirebase(){
   if(!fbEnabled) return false;
   await FactoryDB.pull(S);
+  // The ledger only arrives with the pull, so this is the first moment the app
+  // can tell whether the day it is showing has been closed — by this device
+  // earlier, or by another device just now. A closed day must render from its
+  // ledger entry, never from the operational rows the pull just fetched.
+  try{ reconcileOpenDay(); }catch(e){ console.warn('[sync] reconcile:', e); }
   try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){}
   return FactoryDB.lastPullOk();
 }
