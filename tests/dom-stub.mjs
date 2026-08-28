@@ -15,6 +15,8 @@ export function createElement(tag = 'div', doc = null) {
     className: '', id: '', checked: false, selectedIndex: -1,
     style: {}, dataset: {}, options: [], children: [], childNodes: [],
     files: [], parentNode: null, disabled: false,
+    // Real elements expose both; code under test reads parentElement.
+    get parentElement() { return this.parentNode; },
     classList: {
       _s: new Set(),
       add(...c) { c.forEach(x => this._s.add(x)); },
@@ -84,7 +86,16 @@ export function createDocument() {
     querySelector() { return null; },
     querySelectorAll() { return []; },
     getElementsByTagName() { return []; },
-    addEventListener() {}, removeEventListener() {},
+    // Listeners are RECORDED, not dispatched. This stub has no event
+    // propagation and its elements have no parents, so it cannot exercise the
+    // delegated action layer — but it can at least prove which event a handler
+    // was bound to, which is enough to pin down ordering decisions that depend
+    // on it (see the transfers item-picker test).
+    _listeners: [],
+    addEventListener(type, fn) { this._listeners.push({ type, fn }); },
+    removeEventListener(type, fn) {
+      this._listeners = this._listeners.filter(l => !(l.type === type && l.fn === fn));
+    },
     execCommand() { return true; },
     write() {}, close() {}, open() {},
   };
