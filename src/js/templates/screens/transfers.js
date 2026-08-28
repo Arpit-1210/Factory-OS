@@ -33,7 +33,7 @@ export default `<div class="screen" id="sc-transfers">
     <div class="fg fg2">
       <div class="fld"><label>Item</label>
         <div style="position:relative">
-          <input id="ut-item-search" placeholder="Search item..." data-input="filterUTItems" autocomplete="off">
+          <input id="ut-item-search" placeholder="Search item..." data-input="filterUTItems" data-click="filterUTItems" autocomplete="off">
           <div id="ut-item-dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);max-height:180px;overflow-y:auto;z-index:99;box-shadow:var(--shadow)"></div>
         </div>
       </div>

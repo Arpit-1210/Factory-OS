@@ -237,3 +237,87 @@ describe('assign to order', () => {
     assert.equal(doc.getElementById('assign-modal').style.display, 'none');
   });
 });
+
+describe('the item picker is actually visible', () => {
+  // The dropdown is declared `display:none` in the markup and nothing ever
+  // set it back, so filterUTItems() filled it correctly from the catalogue and
+  // the user saw an empty box no matter what they typed. Every assertion below
+  // is about the container being SHOWN, not about its contents.
+  const dd = () => doc.getElementById('ut-item-dd');
+
+  test('typing opens the list', () => {
+    factory();
+    dd().style.display = 'none';
+    field('ut-type', 'RM');
+    field('ut-item-search', 'resin');
+    call(ctx, 'filterUTItems()');
+
+    assert.notEqual(dd().style.display, 'none', 'the list must be on screen');
+    assert.match(dd().innerHTML, /FRP Resin/);
+  });
+
+  test('an empty query opens the whole catalogue', () => {
+    // Clicking the box with nothing typed should show what is available,
+    // rather than requiring the user to guess a name first.
+    factory();
+    dd().style.display = 'none';
+    field('ut-type', 'RM');
+    field('ut-item-search', '');
+    call(ctx, 'filterUTItems()');
+
+    assert.notEqual(dd().style.display, 'none');
+    assert.match(dd().innerHTML, /FRP Resin/);
+  });
+
+  test('changing the type shows the other catalogue', () => {
+    factory();
+    field('ut-type', 'FG');
+    call(ctx, 'renderUTItemDD()');
+
+    assert.notEqual(dd().style.display, 'none');
+    assert.match(dd().innerHTML, /Chair A/);
+  });
+
+  test('picking an item closes the list', () => {
+    factory();
+    field('ut-type', 'RM');
+    call(ctx, 'filterUTItems()');
+    assert.notEqual(dd().style.display, 'none');
+
+    call(ctx, `selectUTItem('FRP Resin','kg')`);
+    assert.equal(dd().style.display, 'none', 'the list must not sit over the form');
+  });
+
+  test('logging a transfer closes the list', () => {
+    factory();
+    field('ut-item-search', 'FRP Resin'); field('ut-qty', '5');
+    call(ctx, 'filterUTItems()');
+    call(ctx, 'saveUnitTransfer()');
+
+    assert.equal(dd().style.display, 'none');
+  });
+
+  test('changing the type clears a stale pick', () => {
+    // An RM name is not an FG name. Leaving the previous selection in place
+    // let a transfer be logged against an item from the other catalogue.
+    factory();
+    call(ctx, `selectUTItem('FRP Resin','kg')`);
+    assert.equal(doc.getElementById('ut-item-search').value, 'FRP Resin');
+
+    field('ut-type', 'FG');
+    call(ctx, 'renderUTItemDD()');
+
+    assert.equal(doc.getElementById('ut-item-search').value, '');
+    assert.equal(doc.getElementById('ut-unit').value, '');
+  });
+
+  test('an empty catalogue says where to add items', () => {
+    const S = factory();
+    S.rm = [];
+    field('ut-type', 'RM');
+    call(ctx, 'filterUTItems()');
+
+    assert.match(dd().innerHTML, /Setup/,
+      'an empty box with no explanation reads as a broken screen');
+  });
+});

@@ -33,12 +33,46 @@ import { checkXLSX, downloadXLSX } from '../core/xlsx.js';
 
 const UT_DIRECTIONS = ['Unit1→Unit2', 'Unit2→Unit1'];
 
-/** Catalogue for the currently selected type, RM or FG. */
+/**
+ * Catalogue for the currently selected type, RM or FG.
+ *
+ * Straight off the master lists the rest of the app uses — S.rm is the Raw
+ * Material catalogue from Setup, S.fg the Finished Goods one — so an item
+ * added there is transferable immediately and a transfer can only ever name a
+ * product that actually exists.
+ */
 function utCatalogue() {
   const type = (document.getElementById('ut-type') || {}).value || 'RM';
   return type === 'FG'
     ? (S.fg || []).map(f => ({ name: f.name, unit: 'pcs' }))
     : (S.rm || []).map(r => ({ name: r.name, unit: r.unit || '' }));
+}
+
+const UT_DD_LIMIT = 20;
+
+/** Show or hide the item dropdown. */
+function utDD(show) {
+  const dd = document.getElementById('ut-item-dd');
+  if (dd) dd.style.display = show ? 'block' : 'none';
+  return dd;
+}
+
+// Close the list when the click lands outside it. Installed once, from
+// renderUnitTransfers(), because the delegated action layer only fires for
+// elements that NAME an action — a click on empty page space matches nothing
+// and so could never close the dropdown.
+let utOutsideBound = false;
+function bindUTOutsideClose() {
+  if (utOutsideBound || typeof document.addEventListener !== 'function') return;
+  utOutsideBound = true;
+  document.addEventListener('click', (ev) => {
+    const dd = document.getElementById('ut-item-dd');
+    if (!dd || dd.style.display === 'none') return;
+    const wrap = dd.parentElement;
+    const target = ev && ev.target;
+    if (wrap && target && typeof wrap.contains === 'function' && wrap.contains(target)) return;
+    dd.style.display = 'none';
+  });
 }
 
 /**
@@ -50,29 +84,51 @@ export function renderUTItemDD() {
   const wrap = document.getElementById('ut-stage-wrap');
   if (wrap) wrap.style.display = type === 'FG' ? 'block' : 'none';
 
+  // Switching type invalidates whatever was picked: an RM name is not an FG
+  // name, and leaving it in place let a transfer be logged against the wrong
+  // catalogue entirely.
   const search = document.getElementById('ut-item-search');
   if (search) search.value = '';
+  const unitEl = document.getElementById('ut-unit');
+  if (unitEl) unitEl.value = '';
+  // Show the new catalogue straight away — the point of changing the type is
+  // to pick from the other list.
   filterUTItems();
 }
 
 /** Narrow the dropdown as the user types. Empty query shows the first 20. */
 export function filterUTItems() {
-  const dd = document.getElementById('ut-item-dd');
+  // The dropdown is hidden in the markup and was never shown again: this
+  // function filled it correctly from the catalogue and the container stayed
+  // display:none, so the item picker looked empty no matter what was typed.
+  const dd = utDD(true);
   if (!dd) return;
   const q = ((document.getElementById('ut-item-search') || {}).value || '').trim().toLowerCase();
-  const matches = utCatalogue()
-    .filter(i => !q || i.name.toLowerCase().includes(q))
-    .slice(0, 20);
+  const all = utCatalogue().filter(i => i.name && (!q || i.name.toLowerCase().includes(q)));
+  const matches = all.slice(0, UT_DD_LIMIT);
 
   if (!matches.length) {
-    dd.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--text4)">No matching item.</div>';
+    const type = (document.getElementById('ut-type') || {}).value || 'RM';
+    const empty = utCatalogue().length === 0;
+    dd.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--text4)">' +
+      (empty
+        ? `No ${type === 'FG' ? 'finished goods' : 'raw materials'} in the catalogue yet — add them in Setup.`
+        : 'No matching item.') +
+      '</div>';
     return;
   }
+
+  // Say so when the list is capped, rather than letting the user believe the
+  // catalogue stops at twenty.
+  const more = all.length > matches.length
+    ? `<div style="padding:6px 10px;font-size:11px;color:var(--text4)">Showing ${matches.length} of ${all.length} — keep typing to narrow.</div>`
+    : '';
+
   dd.innerHTML = matches.map(i =>
     `<div data-click="selectUTItem" ${argsAttr(i.name, i.unit)} ` +
     'style="padding:8px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border)">' +
     `${i.name}${i.unit ? ` <span style="color:var(--text4)">(${i.unit})</span>` : ''}</div>`
-  ).join('');
+  ).join('') + more;
 }
 
 /** Chosen from the dropdown: fill the search box and default the unit. */
@@ -81,7 +137,7 @@ export function selectUTItem(name, unit) {
   const unitEl = document.getElementById('ut-unit');
   if (search) search.value = name;
   if (unitEl && unit) unitEl.value = unit;
-  const dd = document.getElementById('ut-item-dd');
+  const dd = utDD(false);
   if (dd) dd.innerHTML = '';
 }
 
@@ -113,7 +169,7 @@ export function saveUnitTransfer() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  const dd = document.getElementById('ut-item-dd');
+  const dd = utDD(false);
   if (dd) dd.innerHTML = '';
 
   persist();
@@ -138,6 +194,14 @@ function utFiltered() {
 }
 
 export function renderUnitTransfers() {
+  bindUTOutsideClose();
+
+  // Default the date to the day being worked on. saveUnitTransfer() already
+  // falls back to S.workDate, so a blank field was recording a date the user
+  // could not see.
+  const dateEl = document.getElementById('ut-date');
+  if (dateEl && !dateEl.value) dateEl.value = S.workDate || todayStr();
+
   const rows = utFiltered();
   const today = todayStr();
 
