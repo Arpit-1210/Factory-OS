@@ -57,15 +57,26 @@ function utDD(show) {
   return dd;
 }
 
-// Close the list when the click lands outside it. Installed once, from
+// Close the list when the pointer goes down outside it. Installed once, from
 // renderUnitTransfers(), because the delegated action layer only fires for
-// elements that NAME an action — a click on empty page space matches nothing
+// elements that NAME an action — a press on empty page space matches nothing
 // and so could never close the dropdown.
+//
+// ── WHY mousedown AND NOT click ──
+// Picking an option from a native <select> with the mouse fires BOTH `change`
+// and a `click` on the select. On `click` this handler ran immediately after
+// the change handler had opened the list, saw a target outside the item
+// wrapper, and closed it again — so choosing a Type opened the catalogue and
+// shut it in the same gesture, and the picker looked permanently empty.
+//
+// `mousedown` fires BEFORE the select commits its value, so at that moment the
+// list is still hidden and the guard below returns early. A genuine press
+// elsewhere on the page still closes it, because by then the list is open.
 let utOutsideBound = false;
 function bindUTOutsideClose() {
   if (utOutsideBound || typeof document.addEventListener !== 'function') return;
   utOutsideBound = true;
-  document.addEventListener('click', (ev) => {
+  document.addEventListener('mousedown', (ev) => {
     const dd = document.getElementById('ut-item-dd');
     if (!dd || dd.style.display === 'none') return;
     const wrap = dd.parentElement;

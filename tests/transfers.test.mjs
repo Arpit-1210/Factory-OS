@@ -321,3 +321,32 @@ describe('the item picker is actually visible', () => {
       'an empty box with no explanation reads as a broken screen');
   });
 });
+
+describe('the item list survives the gesture that opens it', () => {
+  // THE BUG THIS PINS DOWN
+  // Picking an option from a native <select> with the mouse fires `change` AND
+  // a `click` on the select. The change handler opened the item list; the
+  // click then reached the close-on-outside-click handler, which saw a target
+  // outside the item wrapper and shut it again. Choosing a Type opened the
+  // catalogue and closed it in the same gesture, so the picker looked
+  // permanently empty — while every unit test passed, because a synthetic
+  // `change` carries no accompanying click.
+  //
+  // Binding the close to `mousedown` fixes the ordering: mousedown fires
+  // BEFORE the select commits its value, when the list is still hidden and the
+  // handler returns early.
+  //
+  // This stub records listeners but does not dispatch them, and its elements
+  // have no parent chain, so the sequence itself cannot be replayed here. What
+  // CAN be asserted is the binding that makes the sequence safe — and that is
+  // exactly the line a future edit would get wrong.
+  test('close-on-outside is bound to mousedown, not click', () => {
+    factory();
+    call(ctx, 'renderUnitTransfers()');
+
+    const types = (doc._listeners || []).map(l => l.type);
+    assert.ok(types.includes('mousedown'),
+      'the item list must close on mousedown; on click it is closed by the ' +
+      'same gesture that opens it');
+  });
+});
