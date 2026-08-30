@@ -214,7 +214,10 @@ export function renderUnitTransfers() {
   if (dateEl && !dateEl.value) dateEl.value = S.workDate || todayStr();
 
   const rows = utFiltered();
-  const today = todayStr();
+  // The open day, matching what saveUnitTransfer() stamps on the rows above.
+  // Counting against the real calendar date left this tile reading 0 on a
+  // past-date login while the log below it filled up.
+  const today = S.workDate || todayStr();
 
   const metrics = document.getElementById('ut-metrics');
   if (metrics) {

@@ -30,7 +30,14 @@ let salActiveMonth = null;
 export function renderSalary(){
   const monthEl = document.getElementById('sal-month');
   if(!monthEl) return;
-  const month = monthEl.value || todayStr().slice(0,7);
+  // Default to the month of the day being worked, not the calendar month.
+  // #sal-month starts empty, so on a past-date login in a previous month this
+  // opened on the wrong month: the open day's attendance was filtered out
+  // (calc.js gates on the month) and days/gross read low. Write the default
+  // back into the picker so the screen, saveSalAdj() and the export cannot
+  // disagree about which month is showing.
+  const month = monthEl.value || (S.workDate||todayStr()).slice(0,7);
+  if(!monthEl.value) monthEl.value = month;
   salActiveMonth = month;
 
   const {rows, totals} = computeSalaryMonth(month);
@@ -72,7 +79,7 @@ export function openSalModal(labId){
   salActiveLab = labId;
   const l = S.lab.find(x=>x.id===labId);
   if(!l) return;
-  const month = document.getElementById('sal-month').value||todayStr().slice(0,7);
+  const month = document.getElementById('sal-month').value||(S.workDate||todayStr()).slice(0,7);
   const adj = (S.salaryAdj[month]||{})[labId]||{};
   document.getElementById('sal-modal-name').textContent = l.name;
   document.getElementById('sal-advance').value = adj.advance||'';
@@ -82,7 +89,7 @@ export function openSalModal(labId){
 }
 export function closeSalModal(){ document.getElementById('sal-modal').style.display='none'; }
 export function saveSalAdj(){
-  const month = document.getElementById('sal-month').value||todayStr().slice(0,7);
+  const month = document.getElementById('sal-month').value||(S.workDate||todayStr()).slice(0,7);
   if(!S.salaryAdj) S.salaryAdj={};
   if(!S.salaryAdj[month]) S.salaryAdj[month]={};
   S.salaryAdj[month][salActiveLab]={
@@ -96,7 +103,7 @@ export function saveSalAdj(){
 }
 export function exportSalaryExcel(){
   if(!checkXLSX()) return;
-  const month = (document.getElementById('sal-month')||document.getElementById('export-sal-month'))?.value||todayStr().slice(0,7);
+  const month = (document.getElementById('sal-month')||document.getElementById('export-sal-month'))?.value||(S.workDate||todayStr()).slice(0,7);
   // Same computation the Salary screen uses — the two cannot diverge.
   const {rows} = computeSalaryMonth(month);
 

@@ -124,7 +124,10 @@ Available: ${maxQty} units
 Enter quantity to transfer:`));
   if(!qty||isNaN(qty)||qty<=0) return;
   if(qty>maxQty){alert(`Only ${maxQty} units available in ${from}.`);return;}
-  S.fgTransfers.push({id:uid(),date:todayStr(),from,to,product,qty,note:'Quick transfer'});
+  // The day being worked, not the calendar day: a Quick Transfer has no date
+  // field, so on a past-date login this silently filed the movement under
+  // today and it vanished from the day it belonged to.
+  S.fgTransfers.push({id:uid(),date:S.workDate||todayStr(),from,to,product,qty,note:'Quick transfer'});
   persist();renderFGStock();
   alert(`✓ ${qty} × ${product} moved from ${from} to ${to}`);
 }
@@ -132,7 +135,7 @@ export function openFGTransfer(){
   initFGStock();
   const sel=document.getElementById('fgt-prod');
   sel.innerHTML=S.fg.map(f=>`<option value="${f.name}">${f.name}</option>`).join('');
-  document.getElementById('fgt-date').value=todayStr();
+  document.getElementById('fgt-date').value=S.workDate||todayStr();
   document.getElementById('fg-transfer-form').style.display='block';
   document.getElementById('fg-transfer-form').scrollIntoView({behavior:'smooth'});
 }
@@ -149,7 +152,7 @@ export function saveFGTransfer(){
   const to=document.getElementById('fgt-to').value;
   const prod=document.getElementById('fgt-prod').value;
   const qty=parseInt(document.getElementById('fgt-qty').value)||0;
-  const date=document.getElementById('fgt-date').value||todayStr();
+  const date=document.getElementById('fgt-date').value||S.workDate||todayStr();
   const note=document.getElementById('fgt-note').value.trim();
   if(!prod||!qty){alert('Select product and enter quantity.');return;}
   const available=getFGBalance(prod,from);
@@ -172,7 +175,7 @@ export function saveFGAdjust(){
   const qty=parseFloat(document.getElementById('fga-qty').value)||0;
   const note=document.getElementById('fga-note').value.trim();
   if(!prod||!qty){alert('Select product and enter quantity.');return;}
-  S.fgAdjustments.push({id:uid(),date:todayStr(),stage,product:prod,qty,note});
+  S.fgAdjustments.push({id:uid(),date:S.workDate||todayStr(),stage,product:prod,qty,note});
   persist();closeFGAdjust();renderFGStock();
   alert(`✓ Adjustment saved: ${prod} ${qty>0?'+':''}${qty} at ${stage}`);
 }

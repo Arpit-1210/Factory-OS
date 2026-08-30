@@ -69,7 +69,7 @@ export function doDispatch(ordId){
   // Record dispatch
   if(!S.dispatches) S.dispatches=[];
   S.dispatches.push({
-    id:uid(), date:todayStr(), orderId:o.id,
+    id:uid(), date:S.workDate||todayStr(), orderId:o.id,
     customer:o.customer, items:o.items,
     amount:o.amount, advance:o.advance,
     balance:o.amount-o.advance,
