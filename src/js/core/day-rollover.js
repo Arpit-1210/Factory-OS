@@ -100,6 +100,65 @@ function clearDaySlots(){
 }
 
 /**
+ * Remember a past day that was left open, so moving to today does not bury it.
+ *
+ * Signing in with no date now goes to today rather than resuming whatever day
+ * the device was left on. That is the right default, but the day being stepped
+ * over may hold a real shift that was never closed — and an unclosed day is
+ * invisible everywhere that matters: it has no ledger row, so it is absent from
+ * Monthly and from payroll, while its attendance and production rows sit in
+ * Postgres under a date nothing asks about.
+ *
+ * Nothing is deleted here. The rows are keyed by work_date and come straight
+ * back when the day is opened. This only makes sure someone is told.
+ */
+export function noteUnclosedDay(date){
+  S.unclosedDay = null;
+  if(!date || date >= todayStr()) return false;   // today or later: nothing left behind
+  if(isDaySaved(date)) return false;              // already closed: properly recorded
+  // An empty day is not worth chasing — no attendance, no production, no issues.
+  var hasWork = (S.sessions||[]).length > 0 ||
+                (S.rawLog||[]).length > 0 ||
+                (S.lab||[]).some(function(l){return l.present;});
+  if(!hasWork) return false;
+  S.unclosedDay = date;
+  return true;
+}
+
+/** Paint (or hide) the notice about a past day that still needs closing. */
+function paintUnclosedBanner(){
+  var el = document.getElementById('unclosed-banner');
+  if(!el) return;
+  var d = S.unclosedDay;
+  // Once that day is closed, or the user has navigated onto it, the notice has
+  // served its purpose.
+  if(!d || isDaySaved(d) || S.workDate===d){ el.style.display='none'; return; }
+  var txt = document.getElementById('unclosed-banner-text');
+  if(txt){
+    var pretty = new Date(d+'T00:00:00')
+      .toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'});
+    txt.textContent = pretty + ' was left open and never closed. Its work is saved but '+
+                      'will not appear in Monthly Data or payroll until the day is closed.';
+  }
+  var btn = document.getElementById('unclosed-banner-open');
+  if(btn) btn.setAttribute('data-args', JSON.stringify([d]));
+  el.style.display='flex';
+}
+
+/** Go to the day the unclosed-day notice is about, so it can be closed. */
+export function openUnclosedDay(date){
+  var d = date || S.unclosedDay;
+  if(!d) return false;
+  return openWorkDate(d);
+}
+
+/** Stop showing the unclosed-day notice for this session. */
+export function dismissUnclosedDay(){
+  S.unclosedDay = null;
+  paintUnclosedBanner();
+}
+
+/**
  * Make a reopened closed day unmistakable. Editing history and recording
  * today's work looked identical, which is how a day got re-closed by accident.
  */
@@ -129,6 +188,7 @@ function paintBanner(){
 function repaint(fromRemote){
   var wd=document.getElementById('work-date'); if(wd) wd.value=S.workDate;
   paintBanner();
+  paintUnclosedBanner();
   try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
   try{renderDashboard();}catch(e){}
   var sid=(document.querySelector('.screen.active')||{}).id;
