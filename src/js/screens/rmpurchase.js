@@ -16,6 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
+import { getRMBalance } from '../core/calc.js';
 import { fmt, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
@@ -106,12 +107,8 @@ export function renderRMPurchase(){
   S.rm.forEach(r=>{
     const s=S.stock.find(st=>st.id===r.id);
     const opening=s?s.opening:0;
-    const purchased=S.purchases.filter(p=>p.name===r.name&&p.type==='purchase').reduce((a,p)=>a+p.qty,0);
-    const adjustments=S.purchases.filter(p=>p.name===r.name&&p.type!=='purchase'&&p.type!=='opening').reduce((a,p)=>a+p.qty,0);
-    const usedHistory=S.ledger.reduce((a,day)=>a+(day.rawLog||[]).filter(rl=>rl.name===r.name).reduce((b,rl)=>b+rl.qty,0),0);
-    const usedToday=S.rawLog.filter(rl=>rl.name===r.name).reduce((a,rl)=>a+rl.qty,0);
-    const balance=opening+purchased+adjustments-usedHistory-usedToday;
-    matSummary[r.name]={name:r.name,unit:r.unit,opening,purchased,adjustments,used:usedHistory+usedToday,balance,reorder:s?s.reorder:100};
+    const {purchased,adjustments,issued,balance}=getRMBalance(r.name);
+    matSummary[r.name]={name:r.name,unit:r.unit,opening,purchased,adjustments,used:issued,balance,reorder:s?s.reorder:100};
   });
 
   document.getElementById('rmp-summary').innerHTML=`

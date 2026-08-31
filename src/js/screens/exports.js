@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { calcOT, closedDaysExcludingOpen, getFGBalance } from '../core/calc.js';
+import { calcOT, closedDaysExcludingOpen, getFGBalance, getRMBalance } from '../core/calc.js';
 import { FG_STAGES } from '../core/config.js';
 import { todayStr } from '../core/format.js';
 import { S } from '../core/state.js';
@@ -117,11 +117,8 @@ export function exportInventory(){
 
   const rmRows=[['Material','Unit','Opening','Purchased','Used','Balance','Reorder Level']];
   (S.stock||[]).forEach(st=>{
-    const purchased=(S.purchases||[]).filter(p=>p.name===st.name).reduce((a,p)=>a+(p.qty||0),0);
-    const usedHistory=(S.ledger||[]).reduce((a,d)=>a+(d.rawLog||[]).filter(r=>r.name===st.name).reduce((b,r)=>b+(r.qty||0),0),0);
-    const usedToday=(S.rawLog||[]).filter(r=>r.name===st.name).reduce((a,r)=>a+(r.qty||0),0);
-    const used=usedHistory+usedToday;
-    rmRows.push([st.name,st.unit||'',st.opening||0,purchased,used,(st.opening||0)+purchased-used,st.reorder||0]);
+    const {purchased,adjustments,issued,balance}=getRMBalance(st.name);
+    rmRows.push([st.name,st.unit||'',st.opening||0,purchased+adjustments,issued,balance,st.reorder||0]);
   });
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rmRows),'Raw Materials');
 

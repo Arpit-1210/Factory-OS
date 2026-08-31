@@ -16,6 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
+import { closedDaysExcludingOpen, getRMBalance } from '../core/calc.js';
 import { todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
@@ -33,17 +34,7 @@ export function renderStock(){
   // Calculate running balance for each material:
   // balance = opening + all purchases - all issues (across all saved days + today)
   function getBalance(matName, unit){
-    const s=S.stock.find(st=>st.name===matName);
-    const opening=s?s.opening:0;
-    // Purchases
-    const purchased=(S.purchases||[]).filter(p=>p.name===matName).reduce((a,p)=>a+p.qty,0);
-    // Issues from saved ledger days
-    const issuedHistory=S.ledger.reduce((a,day)=>{
-      return a+(day.rawLog||[]).filter(r=>r.name===matName).reduce((b,r)=>b+r.qty,0);
-    },0);
-    // Issues from today (not yet saved)
-    const issuedToday=S.rawLog.filter(r=>r.name===matName).reduce((a,r)=>a+r.qty,0);
-    return opening+purchased-issuedHistory-issuedToday;
+    return getRMBalance(matName).balance;
   }
 
   // Populate material selects
@@ -73,10 +64,10 @@ export function renderStock(){
       <th>Unit</th><th class="num">Reorder Level</th><th>Status</th>
     </tr></thead><tbody>
     ${S.stock.map(s=>{
-      const purchased=(S.purchases||[]).filter(p=>p.name===s.name).reduce((a,p)=>a+p.qty,0);
-      const usedHistory=S.ledger.reduce((a,day)=>a+(day.rawLog||[]).filter(r=>r.name===s.name).reduce((b,r)=>b+r.qty,0),0);
-      const usedToday=S.rawLog.filter(r=>r.name===s.name).reduce((a,r)=>a+r.qty,0);
-      const bal=s.opening+purchased-usedHistory-usedToday;
+      // One formula, shared with the reorder alerts above and with every other
+      // screen. This table used to inline its own copy.
+      const {purchased, issuedHistory:usedHistory, issuedOpen:usedToday, balance:bal}
+        = getRMBalance(s.name);
       const crit=s.reorder>0&&bal<=s.reorder;
       return`<tr class="${crit?'tr-l':''}">
         <td style="font-weight:500;color:#111827">${s.name}</td>
@@ -102,15 +93,18 @@ export function renderStock(){
   (S.purchases||[]).forEach(p=>{
     allMovements.push({date:p.date,type:'purchase',name:p.name,unit:p.unit,qty:p.qty,cost:p.cost,note:p.note||''});
   });
-  // Issues from saved days
-  S.ledger.forEach(day=>{
+  // Issues from closed days — excluding the open one, whose issues are listed
+  // below from S.rawLog. On a reopened closed day the ledger entry and
+  // S.rawLog describe the SAME issues, so walking the whole ledger listed
+  // every one of them twice.
+  closedDaysExcludingOpen().forEach(day=>{
     (day.rawLog||[]).forEach(r=>{
       allMovements.push({date:day.date,type:'issue',name:r.name,unit:r.unit,qty:r.qty,note:'Issued to '+r.stage});
     });
   });
-  // Today's issues
+  // The open day's issues, not yet closed into the ledger.
   S.rawLog.forEach(r=>{
-    allMovements.push({date:S.workDate,type:'issue',name:r.name,unit:r.unit,qty:r.qty,note:'Issued to '+r.stage+' (today)'});
+    allMovements.push({date:S.workDate,type:'issue',name:r.name,unit:r.unit,qty:r.qty,note:'Issued to '+r.stage+' (open day)'});
   });
   allMovements.sort((a,b)=>b.date.localeCompare(a.date));
 
