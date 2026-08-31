@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { calcOT, closedDaysExcludingOpen, getFGBalance, isOverdue } from '../core/calc.js';
+import { calcOT, closedDaysExcludingOpen, getFGBalance, getRMBalance, isOverdue } from '../core/calc.js';
 import { STAGES } from '../core/config.js';
 import { fmt, todayStr } from '../core/format.js';
 import { currentRole } from '../core/session.js';
@@ -62,11 +62,10 @@ export function renderDashboard(){
   let rmLow=0;
   S.stock.forEach(st=>{
     if(st.reorder<=0)return;
-    const purchased=(S.purchases||[]).filter(p=>p.name===st.name&&p.qty>0).reduce((a,p)=>a+p.qty,0);
-    const usedH=S.ledger.reduce((a,d)=>a+(d.rawLog||[]).filter(r=>r.name===st.name).reduce((b,r)=>b+r.qty,0),0);
-    const usedT=S.rawLog.filter(r=>r.name===st.name).reduce((a,r)=>a+r.qty,0);
-    const bal=st.opening+purchased-usedH-usedT;
-    if(bal<=st.reorder)rmLow++;
+    // Shared formula. This copy filtered purchases to `qty>0`, so wastage rows
+    // never reduced the balance and a material could sit below its reorder
+    // level without the dashboard ever counting it as low.
+    if(getRMBalance(st.name).balance<=st.reorder)rmLow++;
   });
 
   // ── ALERTS (always visible) ──

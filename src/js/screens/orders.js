@@ -237,7 +237,7 @@ export function importOrdersFromSheets(){
           advance:parseFloat(row.advance)||0,
           items:row.items||'',
           status:row.status||'pending',
-          createdAt:row.date||todayStr(),
+          createdAt:row.date||S.workDate||todayStr(),
           fromSheets:true
         });
         added++;
@@ -280,7 +280,7 @@ export function importOrdersFromSheets(){
             if(!row.customer) return;
             const exists=S.orders.find(o=>o.id===row.id||(o.customer===row.customer&&o.createdAt===row.date));
             if(!exists){
-              S.orders.unshift({id:row.id||('IMP-'+uid()),customer:row.customer||'',phone:row.phone||'',city:row.city||'',requiredBy:row.requiredBy||'',priority:row.priority||'normal',amount:parseFloat(row.amount)||0,advance:parseFloat(row.advance)||0,items:row.items||'',status:row.status||'pending',createdAt:row.date||todayStr(),fromSheets:true});
+              S.orders.unshift({id:row.id||('IMP-'+uid()),customer:row.customer||'',phone:row.phone||'',city:row.city||'',requiredBy:row.requiredBy||'',priority:row.priority||'normal',amount:parseFloat(row.amount)||0,advance:parseFloat(row.advance)||0,items:row.items||'',status:row.status||'pending',createdAt:row.date||S.workDate||todayStr(),fromSheets:true});
               added++;
             }
           });
@@ -310,7 +310,10 @@ export function saveOrder(){
     items: itemsStr,
     fgItems: orderItems.map(i=>({name:i.name,qty:i.qty,price:i.price})),
     status: 'pending',
-    createdAt: todayStr(),
+    // The day being worked. Raising an order while entering a past day
+    // filed it under today, so the order list and that day's sheet reported
+    // different dates for the same event.
+    createdAt: S.workDate||todayStr(),
   };
   S.orders.unshift(order);
   // Reserve inventory against this order
@@ -352,11 +355,11 @@ export function updateOrderStatus(id, status){
   if(!o) return;
   const prev = o.status;
   o.status = status;
-  o.statusUpdatedAt = todayStr();
+  o.statusUpdatedAt = S.workDate||todayStr();
 
   // On dispatch — deduct from Packing stage FG stock
   if(status==='dispatched' && prev!=='dispatched'){
-    o.dispatchedAt = todayStr();
+    o.dispatchedAt = S.workDate||todayStr();
     // Try to deduct items from Packing stock via transfer record
     if(o.items && o.fgItems && o.fgItems.length){
       o.fgItems.forEach(item=>{
@@ -376,7 +379,7 @@ export function updateOrderStatus(id, status){
     // Sync dispatch to Sheets
     if(S.sheetsUrl){
       sendGet(S.sheetsUrl,'action=order&payload='+encodeURIComponent(JSON.stringify({
-        action:'order',id:o.id,date:todayStr(),customer:o.customer,
+        action:'order',id:o.id,date:S.workDate||todayStr(),customer:o.customer,
         phone:o.phone||'',city:o.city||'',requiredBy:o.requiredBy||'',
         priority:o.priority,items:o.items||'',amount:o.amount,
         advance:o.advance,balance:o.amount-o.advance,status:'dispatched'
@@ -387,7 +390,7 @@ export function updateOrderStatus(id, status){
   // On start production — sync status update to Sheets
   if(status==='production' && S.sheetsUrl){
     sendGet(S.sheetsUrl,'action=order&payload='+encodeURIComponent(JSON.stringify({
-      action:'order',id:o.id,date:todayStr(),customer:o.customer,
+      action:'order',id:o.id,date:S.workDate||todayStr(),customer:o.customer,
       phone:o.phone||'',city:o.city||'',requiredBy:o.requiredBy||'',
       priority:o.priority,items:o.items||'',amount:o.amount,
       advance:o.advance,balance:o.amount-o.advance,status:'production'

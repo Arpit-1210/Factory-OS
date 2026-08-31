@@ -51,22 +51,25 @@ export function saveDocAsOrder(){
     items: itemsStr,
     fgItems: docItems.map(i=>({name:i.name, qty:i.qty, price:i.rate||0})),
     status: 'pending',
-    createdAt: todayStr(),
+    createdAt: S.workDate||todayStr(),
     fromQuotation: true,
     docType: type,
   };
 
   if(!S.orders) S.orders=[];
   // Check not duplicate
-  const exists = S.orders.find(o=>o.customer===cust&&o.createdAt===todayStr()&&o.amount===total);
-  if(exists){ alert('An order for '+cust+' with same amount already exists today.'); return; }
+  // Compare against the same day the order is being filed under, or the
+  // guard never trips while entering a past day.
+  const filedOn = S.workDate||todayStr();
+  const exists = S.orders.find(o=>o.customer===cust&&o.createdAt===filedOn&&o.amount===total);
+  if(exists){ alert('An order for '+cust+' with the same amount already exists on that date.'); return; }
 
   S.orders.unshift(order);
   persist();
 
   // Sync to Sheets
   if(S.sheetsUrl){
-    const payload={action:'order',date:todayStr(),id:order.id,customer:order.customer,phone:order.phone,city:order.city,requiredBy:order.requiredBy,priority:order.priority,items:order.items,amount:order.amount,advance:order.advance,balance:order.amount-order.advance,status:'pending'};
+    const payload={action:'order',date:filedOn,id:order.id,customer:order.customer,phone:order.phone,city:order.city,requiredBy:order.requiredBy,priority:order.priority,items:order.items,amount:order.amount,advance:order.advance,balance:order.amount-order.advance,status:'pending'};
     sendGet(S.sheetsUrl,'action=order&payload='+encodeURIComponent(JSON.stringify(payload)));
   }
 
@@ -83,8 +86,11 @@ export function renderDocs(){
   if(osel) osel.innerHTML = '<option value="">— select order —</option>' +
     S.orders.map(o=>`<option value="${o.id}">${o.id} · ${o.customer} · ${o.city}</option>`).join('');
 
-  // Set default date and number
-  const today = todayStr();
+  // Set default date and number.
+  // The document's issue date follows the day being worked: a quotation
+  // written up while entering a past day belongs to that day, and the serial
+  // number is derived from the same date so numbering stays in step with it.
+  const today = S.workDate||todayStr();
   document.getElementById('doc-date').value = today;
   const valid = new Date(today+'T00:00:00'); valid.setDate(valid.getDate()+15);
   document.getElementById('doc-valid').value = valid.toISOString().slice(0,10);
@@ -98,7 +104,7 @@ export function updateDocType(){
   const validWrap = document.getElementById('doc-valid-wrap');
   validWrap.style.display = type==='quotation' ? 'block' : 'none';
   const prefixes = {quotation:'Q', invoice:'INV', challan:'DC'};
-  const today = todayStr();
+  const today = S.workDate||todayStr();
   document.getElementById('doc-number').value = prefixes[type] + '-' + today.replace(/-/g,'').slice(2) + '-' + String(docCounter[type]).padStart(3,'0');
   updateDocPreview();
 }
@@ -317,7 +323,7 @@ export function printDoc(){
         advance: advance,
         items: docItems.map(i=>i.qty+'× '+i.name).join(', '),
         status: 'pending',
-        createdAt: docDate||todayStr(),
+        createdAt: docDate||S.workDate||todayStr(),
         fromQuotation: true
       };
       S.orders.unshift(newOrder);

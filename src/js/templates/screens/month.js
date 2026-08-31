@@ -26,6 +26,9 @@ export default `      <div class="screen" id="sc-month">
               <div>
                 <div class="ct">Day Detail</div>
                 <div id="m-day-title" style="font-size:16px;font-weight:700;color:var(--text);margin-top:4px"></div>
+                <!-- When the day was actually typed in, and whether it has been
+                     overwritten since. Hidden unless there is something to say. -->
+                <div id="m-day-provenance" style="display:none;margin-top:6px;font-size:11px;color:var(--amber);font-family:var(--mono);line-height:1.6"></div>
               </div>
               <button class="btn btn-sm" data-click="closeMonthDayDetail">✕</button>
             </div>

@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { getFGBalance } from '../core/calc.js';
+import { getFGBalance, getRMBalance } from '../core/calc.js';
 import { FG_STAGES } from '../core/config.js';
 import { fmt, fmtN, todayStr } from '../core/format.js';
 import { S } from '../core/state.js';
@@ -35,15 +35,9 @@ export function renderInventory(){
   const q = (searchBox ? searchBox.value : '').toLowerCase().trim();
 
   // ── RM BALANCE HELPER ──
-  function getRMBalance(name){
-    const s=S.stock.find(st=>st.name===name);
-    const opening=s?s.opening:0;
-    const purchased=(S.purchases||[]).filter(p=>p.name===name&&p.qty>0).reduce((a,p)=>a+p.qty,0);
-    const wastage=(S.purchases||[]).filter(p=>p.name===name&&p.qty<0).reduce((a,p)=>a+p.qty,0);
-    const usedHistory=S.ledger.reduce((a,day)=>a+(day.rawLog||[]).filter(r=>r.name===name).reduce((b,r)=>b+r.qty,0),0);
-    const usedToday=S.rawLog.filter(r=>r.name===name).reduce((a,r)=>a+r.qty,0);
-    return opening+purchased+wastage-usedHistory-usedToday;
-  }
+  // This screen's own copy of the raw-material balance is gone; core/calc.js
+  // holds the one formula, dated to the open day.
+  const rmBalance = (name) => getRMBalance(name).balance;
 
   // ── FG CUMULATIVE BALANCE (all time including all saved days) ──
   function getFGCumulative(productName, stage){
@@ -51,7 +45,7 @@ export function renderInventory(){
   }
 
   // ── HEALTH METRICS ──
-  const rmItems = S.rm.map(r=>({name:r.name,unit:r.unit,bal:getRMBalance(r.name),reorder:(S.stock.find(st=>st.id===r.id)||{}).reorder||0}));
+  const rmItems = S.rm.map(r=>({name:r.name,unit:r.unit,bal:rmBalance(r.name),reorder:(S.stock.find(st=>st.id===r.id)||{}).reorder||0}));
   const rmLow = rmItems.filter(r=>r.reorder>0&&r.bal<=r.reorder).length;
   const allProds = getAllFGProducts();
   const fgPipeline = ['Moulding','Finishing','Painting'].reduce((a,st)=>a+allProds.filter(p=>getFGCumulative(p,st)>0).length,0);

@@ -55,27 +55,63 @@ export function closedDaysExcludingOpen(){
   return (S.ledger||[]).filter(e => e.date !== S.workDate);
 }
 
-export function getFGBalance(productName, stage){
-  if(!S.fgStock) return 0;
+// ── STOCK IS A BALANCE AS AT A DATE ──
+//
+// Every stock figure below is the sum of dated movements up to a cut-off, not
+// a stored running total. That is how an inventory system has to work if a day
+// can be entered after the fact: ask for the balance on the 26th and you get
+// what was on the floor on the 26th, whatever has happened since.
+//
+// It did not work that way. Every term was summed over ALL time with no
+// reference to the date on the row, so opening a past day showed that day's
+// production and attendance beside TODAY's stock. Work was recorded for the
+// 26th against balances that included the 27th through the 30th — and the
+// availability checks that gate a transfer ("only N units available") were
+// answering for the wrong day, refusing moves that were valid when they
+// happened and permitting ones that were not.
+//
+// The cut-off defaults to the open day, so on today nothing changes: today is
+// on or after every movement, and the sums are exactly what they were.
 
-  // 1. Manual opening stock set in setup
+/** The day balances are being asked about, unless a caller says otherwise. */
+export function asOfDate(){ return S.workDate || todayStr(); }
+
+/**
+ * Is a movement on or before the cut-off?
+ *
+ * An undated row counts as always-having-been-there. Rows written before the
+ * date fixes have no `date` at all, and dropping them would silently deflate
+ * every balance that depends on them — a wrong number with no visible cause.
+ */
+function upTo(date, asOf){ return !date || date <= asOf; }
+
+export function getFGBalance(productName, stage, asOf){
+  if(!S.fgStock) return 0;
+  const cutoff = asOf || asOfDate();
+
+  // 1. Manual opening stock set in setup. Undated by nature — it is the
+  //    balance everything else moves from, so it is always in scope.
   const opening = (S.fgStock[stage]&&S.fgStock[stage][productName])||0;
 
-  // 2. Production logged directly at this stage (today + history)
-  const producedToday = S.sessions.reduce((a,ss)=>
+  // 2. Production logged directly at this stage (open day + history).
+  //    The open day's sessions belong to S.workDate, so they count only when
+  //    that day is itself within the cut-off.
+  const producedToday = upTo(S.workDate, cutoff) ? S.sessions.reduce((a,ss)=>
     a+(ss.teams||[]).filter(t=>t.stage===stage)
       .reduce((b,t)=>b+t.production
         .filter(p=>(p.baseName||p.name)===productName||p.name===productName)
         .reduce((c,p)=>c+p.qty,0),0)
-  ,0);
-  const producedHistory = closedDaysExcludingOpen().reduce((a,day)=>
-    a+(day.sessions||[]).reduce((b,ss)=>
-      b+(ss.teams||[]).filter(t=>t.stage===stage)
-        .reduce((c,t)=>c+(t.production||[])
-          .filter(p=>(p.baseName||p.name)===productName||p.name===productName)
-          .reduce((d,p)=>d+p.qty,0),0)
-    ,0)
-  ,0);
+  ,0) : 0;
+  const producedHistory = closedDaysExcludingOpen()
+    .filter(day=>upTo(day.date, cutoff))
+    .reduce((a,day)=>
+      a+(day.sessions||[]).reduce((b,ss)=>
+        b+(ss.teams||[]).filter(t=>t.stage===stage)
+          .reduce((c,t)=>c+(t.production||[])
+            .filter(p=>(p.baseName||p.name)===productName||p.name===productName)
+            .reduce((d,p)=>d+p.qty,0),0)
+      ,0)
+    ,0);
 
   // 3. Transferred IN to this stage from another stage (stage-to-stage moves)
   //    Only count inter-stage transfers (not Order- or Dispatch destinations which are exits)
@@ -89,6 +125,7 @@ export function getFGBalance(productName, stage){
   const transferredIn = (S.fgTransfers||[]).filter(t=>{
     if(t.to!==stage) return false;
     if(!REAL_STAGES.includes(t.from)) return false; // skip Unit2, external etc
+    if(!upTo(t.date, cutoff)) return false;
     const inName = t.productIn||t.product;
     return inName===productName||t.product===productName;
   }).reduce((a,t)=>a+t.qty,0);
@@ -96,6 +133,7 @@ export function getFGBalance(productName, stage){
   // 4. Transferred OUT from this stage (to another stage, Order, Dispatch, Unit2)
   const transferredOut = (S.fgTransfers||[]).filter(t=>{
     if(t.from!==stage) return false;
+    if(!upTo(t.date, cutoff)) return false;
     const outName = t.productIn||t.product;
     return outName===productName||t.product===productName;
   }).reduce((a,t)=>a+t.qty,0);
@@ -103,9 +141,52 @@ export function getFGBalance(productName, stage){
   // 5. Manual adjustments
   const adjustments = (S.fgAdjustments||[])
     .filter(a=>a.stage===stage&&(a.product===productName||(a.product||'').startsWith(productName)))
+    .filter(a=>upTo(a.date, cutoff))
     .reduce((a,adj)=>a+adj.qty,0);
 
   return Math.max(0, opening + producedToday + producedHistory + transferredIn - transferredOut + adjustments);
+}
+
+/**
+ * Raw-material balance as at a date: opening + purchases received − issues.
+ *
+ * Lives here rather than in screens/stock.js because that screen had TWO
+ * copies of this formula — one for the reorder alerts and one inlined in the
+ * table — which could disagree with each other about the same material.
+ *
+ * Both copies also summed issues over the WHOLE ledger while separately adding
+ * the open day's unsaved issues. On a reopened closed day those are the same
+ * issues counted twice, which understated the balance and could raise a false
+ * reorder alarm. closedDaysExcludingOpen() is the existing guard for that.
+ */
+export function getRMBalance(matName, asOf){
+  const cutoff = asOf || asOfDate();
+  const s = (S.stock||[]).find(st=>st.name===matName);
+  const opening = s ? (s.opening||0) : 0;
+
+  // Receipt rows in scope. `type:'opening'` rows are skipped because the
+  // opening balance is already carried by S.stock.opening above — counting
+  // both is how an opening quantity ends up in the balance twice.
+  const rows = (S.purchases||[]).filter(p=>
+    p.name===matName && p.type!=='opening' && upTo(p.date, cutoff));
+  const purchased   = rows.filter(p=>p.qty>0).reduce((a,p)=>a+p.qty,0);
+  // Negative receipt rows: wastage, spoilage, a correction to an over-entry.
+  // Signed, so it adds. The dashboard's reorder count used to filter these
+  // out with `p.qty>0` and so reported more material on hand than there was —
+  // exactly the alarm you do not want a factory to miss.
+  const adjustments = rows.filter(p=>p.qty<0).reduce((a,p)=>a+p.qty,0);
+
+  const issuedHistory = closedDaysExcludingOpen()
+    .filter(day=>upTo(day.date, cutoff))
+    .reduce((a,day)=>a+(day.rawLog||[])
+      .filter(r=>r.name===matName).reduce((b,r)=>b+r.qty,0),0);
+  const issuedOpen = upTo(S.workDate, cutoff)
+    ? (S.rawLog||[]).filter(r=>r.name===matName).reduce((a,r)=>a+r.qty,0)
+    : 0;
+
+  return { opening, purchased, adjustments, issuedHistory, issuedOpen,
+           issued: issuedHistory + issuedOpen,
+           balance: opening + purchased + adjustments - issuedHistory - issuedOpen };
 }
 
 export function otAmt(worker){

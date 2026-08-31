@@ -180,7 +180,9 @@ describe('saveDay — writing the day into the ledger', () => {
     S.lab = [worker(1, 'A', 400, { present: true })];
     call(ctx, 'saveDay()');
 
-    // Re-open the same date (as a correction) and save again.
+    // Re-open the same date (as a correction) and save again. Re-closing a day
+    // that is already in the ledger asks for a reason, so answer it.
+    ctx.prompt = () => 'recount of B';
     S.workDate = '2026-08-19';
     S.lab = [worker(1, 'A', 400, { present: true }), worker(2, 'B', 500, { present: true })];
     call(ctx, 'saveDay()');
@@ -188,6 +190,39 @@ describe('saveDay — writing the day into the ledger', () => {
     const rows = S.ledger.filter(e => e.date === '2026-08-19');
     assert.equal(rows.length, 1);
     assert.equal(rows[0].labourCost, 900, 'the ledger holds the corrected figures');
+    assert.equal(rows[0].reopenReason, 'recount of B', 'and why it was changed');
+    ctx.prompt = () => null;
+  });
+
+  test('cancelling the reason prompt leaves the closed day untouched', () => {
+    // Backing out of a correction must not half-apply it: the ledger keeps the
+    // original figures and the day stays open for another attempt.
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.lab = [worker(1, 'A', 400, { present: true })];
+    call(ctx, 'saveDay()');
+
+    S.workDate = '2026-08-19';
+    S.lab = [worker(1, 'A', 400, { present: true }), worker(2, 'B', 500, { present: true })];
+    ctx.prompt = () => null;          // the user presses Cancel
+    call(ctx, 'saveDay()');
+
+    const rows = S.ledger.filter(e => e.date === '2026-08-19');
+    assert.equal(rows[0].labourCost, 400, 'the original entry is intact');
+    assert.equal(S.workDate, '2026-08-19', 'and the day is still open');
+  });
+
+  test('closing a day records when it was entered, apart from the day it covers', () => {
+    // A day recorded three weeks late has to be tellable from one recorded
+    // live; `date` alone cannot say which this was.
+    const S = resetState(ctx, { workDate: '2026-08-19' });
+    S.lab = [worker(1, 'A', 400, { present: true })];
+
+    call(ctx, 'saveDay()');
+
+    const row = S.ledger.find(e => e.date === '2026-08-19');
+    assert.equal(row.date, '2026-08-19', 'the day it covers');
+    assert.match(row.enteredAt, /^\d{4}-\d{2}-\d{2}T/, 'and when it was typed in');
+    assert.ok(new Date(row.enteredAt) <= new Date(), 'a real wall-clock moment');
   });
 
   test('the ledger keeps its own copy of rawLog, which the day-clear cannot empty', () => {
@@ -443,8 +478,10 @@ describe('reopening a closed day and saving it again is lossless', () => {
       goodsValue: 7000,
     }];
 
+    ctx.prompt = () => 'correcting the moulding count';
     call(ctx, 'openWorkDate("2026-08-19", {reopen:true})');
     call(ctx, 'saveDay()');
+    ctx.prompt = () => null;
 
     const entry = S.ledger.find(e => e.date === '2026-08-19');
     assert.ok(entry, 'the day is still in the ledger');
@@ -464,9 +501,53 @@ describe('reopening a closed day and saving it again is lossless', () => {
     call(ctx, 'openWorkDate("2026-08-19", {reopen:true})');
     assert.equal(S.reopenDate, '2026-08-19');
 
+    ctx.prompt = () => 'late correction';
     call(ctx, 'saveDay()');
+    ctx.prompt = () => null;
 
     assert.equal(S.reopenDate, null, 'no longer editing a past day');
     assert.notEqual(S.workDate, '2026-08-19', 'and not sitting on the day just closed');
+  });
+});
+
+describe('the month view says how a day came to be recorded', () => {
+  // `date` and `enteredAt` are different questions and the month report is
+  // where the difference matters: a day typed in a fortnight late reads
+  // exactly like one recorded live unless it is stated.
+  test('a day entered late is marked as such', () => {
+    const S = resetState(ctx, { workDate: '2026-08-30' });
+    S.ledger = [{ date: '2026-08-12', enteredAt: '2026-08-26T09:15:00.000Z',
+                  goodsValue: 1000, netProfit: 100, productLog: [], attendance: [] }];
+
+    call(ctx, 'showMonthDay("2026-08-12")');
+
+    const el = ctx.document.getElementById('m-day-provenance');
+    assert.equal(el.style.display, 'block');
+    assert.match(el.innerHTML, /Recorded 14 days later, on 2026-08-26/);
+  });
+
+  test('a day recorded on the day itself says nothing', () => {
+    const S = resetState(ctx, { workDate: '2026-08-30' });
+    S.ledger = [{ date: '2026-08-12', enteredAt: '2026-08-12T18:00:00.000Z',
+                  goodsValue: 1000, netProfit: 100, productLog: [], attendance: [] }];
+
+    call(ctx, 'showMonthDay("2026-08-12")');
+
+    const el = ctx.document.getElementById('m-day-provenance');
+    assert.equal(el.style.display, 'none', 'no notice on an ordinary day');
+    assert.equal(el.innerHTML, '');
+  });
+
+  test('an overwritten day shows when and why', () => {
+    const S = resetState(ctx, { workDate: '2026-08-30' });
+    S.ledger = [{ date: '2026-08-12', enteredAt: '2026-08-12T18:00:00.000Z',
+                  reopenedAt: '2026-08-27T11:00:00.000Z', reopenReason: 'missed a team',
+                  goodsValue: 1000, netProfit: 100, productLog: [], attendance: [] }];
+
+    call(ctx, 'showMonthDay("2026-08-12")');
+
+    const el = ctx.document.getElementById('m-day-provenance');
+    assert.match(el.innerHTML, /Reopened and re-saved on 2026-08-27/);
+    assert.match(el.innerHTML, /missed a team/);
   });
 });
