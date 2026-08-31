@@ -49,8 +49,35 @@ export function showMonthDay(dateStr){
   if(!e){ detail.style.display='none'; return; }
 
   const d = new Date(dateStr+'T00:00:00');
-  document.getElementById('m-day-title').textContent =
+  const titleEl = document.getElementById('m-day-title');
+  titleEl.textContent =
     d.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+
+  // ── HOW THIS DAY CAME TO BE RECORDED ──
+  // `date` is the day on the floor; `enteredAt` is when someone typed it in.
+  // A day entered a fortnight late, or a closed day overwritten afterwards,
+  // reads exactly like one recorded live unless it is said out loud — and it
+  // is the first thing anyone checking the month wants to know.
+  const noteEl = document.getElementById('m-day-provenance');
+  if(noteEl){
+    const first = e.originallyEnteredAt || e.enteredAt;
+    const bits = [];
+    if(first){
+      const entered = String(first).slice(0,10);
+      if(entered > dateStr){
+        const lateBy = Math.round((new Date(entered+'T00:00:00') - d)/86400000);
+        bits.push('Recorded '+lateBy+' day'+(lateBy===1?'':'s')+' later, on '+entered);
+      }
+    }
+    if(e.reopenedAt){
+      bits.push('Reopened and re-saved on '+String(e.reopenedAt).slice(0,10)+
+                (e.reopenReason ? ' — “'+e.reopenReason+'”' : ' (no reason given)'));
+    }
+    noteEl.innerHTML = bits.length
+      ? bits.map(b=>'<div>⚠️ '+b+'</div>').join('')
+      : '';
+    noteEl.style.display = bits.length ? 'block' : 'none';
+  }
 
   const mg = e.goodsValue>0?Math.round(e.netProfit/e.goodsValue*100):0;
   document.getElementById('m-day-metrics').innerHTML=`

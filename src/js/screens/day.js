@@ -96,6 +96,13 @@ export function buildPayload(){
   const attendance=S.lab.map(l=>({id:l.id,name:l.name,role:l.role,wage:l.wage,present:l.present,doingOT:l.doingOT,otHours:l.otHours||0,ot:l.otHours||0}));
   return{
     date:S.workDate,
+    // ── WHEN THE WORK HAPPENED vs WHEN IT WAS TYPED IN ──
+    // `date` is the day on the factory floor and is freely backdated.
+    // `enteredAt` is wall-clock and never is. Every accounting system keeps
+    // these apart, because without the second one a day recorded three weeks
+    // late is indistinguishable from one recorded live — which is the first
+    // thing anyone auditing the month will ask about.
+    enteredAt:new Date().toISOString(),
     workersPresent:present.length,
     goodsValue:totalGoods,
     labourCost:bw,
@@ -136,10 +143,43 @@ export function syncToSheets(){
 // Now: write first, and only commit to closing the day once the row is
 // actually in day_ledger.
 export async function saveDay(){
-  const payload = buildPayload();
-  const entry = {...payload, date:S.workDate, rawLog:S.rawLog.map(r=>({...r}))};
-
   const savedDate = S.workDate;
+
+  // ── RE-CLOSING A DAY THAT IS ALREADY IN THE LEDGER ──
+  //
+  // Overwriting a closed day replaces a figure that has already been reported
+  // in Monthly Data, so it is recorded rather than silently allowed: who did
+  // it is in `saved_by`, when is in `enteredAt`, and why is asked for here.
+  // Established books call this a lock reason and keep it for exactly this
+  // case.
+  //
+  // Asked at SAVE time, not when the day is opened, so it covers every route
+  // in — the header date picker, a past-date login, or a day reopened on
+  // another device — rather than only the one that happens to prompt.
+  const existing = S.ledger.find(e=>e.date===savedDate);
+  let reopenReason = null;
+  if(existing){
+    const pretty = new Date(savedDate+'T00:00:00')
+      .toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'});
+    reopenReason = prompt(
+      pretty+' is already closed and counted in Monthly Data.\n\n'+
+      'Saving replaces that entry. Briefly, why?\n'+
+      '(kept with the day as a record of the change)');
+    // Cancel means cancel. Only an empty string is "no reason given".
+    if(reopenReason===null) return false;
+    reopenReason = reopenReason.trim();
+  }
+
+  const payload = buildPayload();
+  if(existing){
+    payload.reopenReason = reopenReason;
+    payload.reopenedAt   = new Date().toISOString();
+    // Keep the first close, so "recorded on" does not quietly become the date
+    // of the most recent correction.
+    payload.originallyEnteredAt = existing.enteredAt || existing.originallyEnteredAt || null;
+  }
+  const entry = {...payload, date:savedDate, rawLog:S.rawLog.map(r=>({...r}))};
+
   // Advance to the first day that is not already closed, not blindly to the
   // next calendar day. Re-closing an old day used to land the user on the day
   // after it — which is usually itself closed — so the app opened a day that
