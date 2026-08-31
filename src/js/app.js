@@ -191,6 +191,10 @@ try{
   // past day open, and showing 'today' over it invited the user to record
   // against a day the app was not actually on.
   if(wd){ wd.value=S.workDate; wd.max=today; }
+  // Same cap on the login field. It was set only in doLogout(), so a fresh
+  // page load offered a date picker with no upper bound.
+  const lwd=document.getElementById('login-work-date');
+  if(lwd) lwd.max=today;
   if(!S.fgTransfers) S.fgTransfers=[];
   if(!S.fgAdjustments) S.fgAdjustments=[];
   if(!S.fgStock) S.fgStock={};

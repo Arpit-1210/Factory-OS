@@ -25,7 +25,7 @@ export function renderStock(){
   // Sync stock items with RM catalogue
   S.rm.forEach(r=>{
     if(!S.stock.find(s=>s.id===r.id)){
-      S.stock.push({id:r.id,name:r.name,unit:r.unit,opening:0,reorder:100,openingDate:todayStr()});
+      S.stock.push({id:r.id,name:r.name,unit:r.unit,opening:0,reorder:100,openingDate:S.workDate||todayStr()});
     }
   });
   S.stock=S.stock.filter(s=>S.rm.find(r=>r.id===s.id));
@@ -160,9 +160,14 @@ export function saveStock(){
   const reorder=parseFloat(document.getElementById('stk-reorder').value)||0;
   const rm=S.rm.find(r=>r.id===id);
   let s=S.stock.find(st=>st.id===id);
-  if(!s){s={id,name:rm.name,unit:rm.unit,opening:0,reorder:100,openingDate:todayStr()};S.stock.push(s);}
+  // Opening stock dated to the open day. Stamping it with today while working
+  // a past day dates the opening balance AFTER the movements it opens, which
+  // sorts it to the top of the movement list and reads as stock arriving in
+  // the future.
+  const openedOn=S.workDate||todayStr();
+  if(!s){s={id,name:rm.name,unit:rm.unit,opening:0,reorder:100,openingDate:openedOn};S.stock.push(s);}
   s.opening=qty;s.reorder=reorder;s.name=rm.name;s.unit=rm.unit;
-  if(!s.openingDate) s.openingDate=todayStr();
+  if(!s.openingDate) s.openingDate=openedOn;
   persist();closeStockForm();renderStock();
   alert(`✓ Opening stock set: ${rm.name} = ${qty} ${rm.unit}`);
 }
@@ -184,8 +189,11 @@ export function savePurchase(){
   if(!qty){alert('Enter quantity received.');return;}
   const cost=parseFloat(document.getElementById('pur-cost').value)||0;
   const note=document.getElementById('pur-note').value.trim();
+  // This form has no date field, so the open day is the only thing that can
+  // date it. On a past-date login todayStr() put the receipt in Stock History
+  // above the very issues it was meant to cover.
   S.purchases.push({
-    id:uid(),date:todayStr(),name:rm.name,unit:rm.unit,qty,cost,note
+    id:uid(),date:S.workDate||todayStr(),name:rm.name,unit:rm.unit,qty,cost,note
   });
   persist();
   document.getElementById('pur-qty').value='';

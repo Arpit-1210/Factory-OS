@@ -96,7 +96,7 @@ export function renderDashboard(){
     </div>
     <div class="dash-card c-blue" data-click="go" data-args="[&quot;transfers&quot;]">
       <span class="dc-icon">🔄</span><div class="dc-label">Unit 2 Transfers</div>
-      <div class="dc-value">${(S.unitTransfers||[]).filter(t=>t.date===todayStr()).length}</div><div class="dc-sub">today · ${(S.unitTransfers||[]).length} total</div>
+      <div class="dc-value">${(S.unitTransfers||[]).filter(t=>t.date===(S.workDate||todayStr())).length}</div><div class="dc-sub">today · ${(S.unitTransfers||[]).length} total</div>
     </div>` : `
     <div class="dash-card c-blue" data-click="go" data-args="[&quot;att&quot;]">
       <span class="dc-icon">👷</span><div class="dc-label">Workers Present</div>

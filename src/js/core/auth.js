@@ -16,7 +16,7 @@
 
 import { updateSidebarForRole } from '../components/sidebar.js';
 import { ROLE_HOME } from './config.js';
-import { checkDayRollover } from './day-rollover.js';
+import { checkDayRollover, openWorkDate } from './day-rollover.js';
 import { todayStr } from './format.js';
 import { go } from './router.js';
 import { currentRole, fbEnabled, setRole } from './session.js';
@@ -53,6 +53,16 @@ export async function doLogin(){
     errEl.style.display='block';
     return;
   }
+  // The header date picker rejects future dates (app.js) but this field did
+  // not, and `max` was set only in doLogout() — so on a fresh load nothing
+  // stopped a login onto next week, which would then record real work under a
+  // day that has not happened.
+  const wantDate = document.getElementById('login-work-date')?.value;
+  if(wantDate && wantDate > todayStr()){
+    errEl.textContent='❌ That date is in the future. Work can only be recorded up to today.';
+    errEl.style.display='block';
+    return;
+  }
 
   if(!fbEnabled){
     const ok = await initFirebase();
@@ -84,27 +94,10 @@ export async function doLogin(){
   onLoginSuccess((res.user.user_metadata||{}).name || email.split('@')[0]);
 }
 export function onLoginSuccess(displayName){
-  // Check if user selected a past date
+  // Which day is this session working on? Blank, or today's date, means today.
   const loginDate = document.getElementById('login-work-date')?.value;
-  if(loginDate && loginDate !== todayStr()){
-    // Point the app at the requested day BEFORE the initial pull, so the pull
-    // fetches that day's rows rather than today's. Whether the day turns out
-    // to be closed is settled by reconcileOpenDay() once the ledger has
-    // arrived — it cannot be decided here, because S.ledger is still whatever
-    // this device had cached.
-    // NOTE: this used to also write `_day_cleared_<today>` "so the Firebase
-    // listener doesn't overwrite past date work". There is no Firebase
-    // listener any more, and every operational table is keyed by work_date, so
-    // reading a past day cannot collide with today's rows. All that flag did
-    // was make loadState() wipe today's real attendance and sessions on every
-    // reload for the rest of the calendar day.
-    S.sessions=[]; S.rawLog=[];
-    S.lab.forEach(l=>{l.present=false;l.doingOT=false;l.otHours=0;});
-    S.workDate = loginDate;
-    S.reopenDate = null;
-    const wd=document.getElementById('work-date');
-    if(wd) wd.value=loginDate;
-  }
+  const pastDate = (loginDate && loginDate <= todayStr() && loginDate !== todayStr())
+    ? loginDate : null;
 
   document.getElementById('login-page').style.display='none';
   document.getElementById('app-shell').style.display='flex';
@@ -112,8 +105,45 @@ export function onLoginSuccess(displayName){
   const el=document.getElementById('role-tag');
   el.textContent=(displayName?displayName+' · ':'')+tags[currentRole];
   el.className='role-tag '+currentRole;
-  if(!loginDate || loginDate===todayStr()) checkDayRollover();
   updateSidebarForRole();
+
+  // ── OPENING THE DAY THE USER ASKED FOR ──
+  //
+  // Through openWorkDate(), which is the only function allowed to move
+  // S.workDate (see core/day-rollover.js). This used to assign S.workDate
+  // directly and null S.reopenDate, and so skipped every part of the machinery
+  // that makes a chosen day actually hold:
+  //
+  //   · S.reopenDate stayed null, so isReopened() was false and the 60-second
+  //     checkDayRollover interval in app.js moved the user straight back to
+  //     today. That interval's first guard exists precisely to stop this —
+  //     "any date worth opening is by definition in the ledger" — and the
+  //     login path was the one caller that never armed it.
+  //   · A closed day was not read from its ledger entry, so it opened EMPTY
+  //     and invited the user to re-enter a day that was already recorded.
+  //     Saving then replaced the real ledger entry with the re-entered one.
+  //   · repaint() never ran, so the amber "you are editing closed history"
+  //     banner never appeared and nothing was written to localStorage — a
+  //     reload landed in loadState()'s third branch and snapped back to today.
+  //
+  // `reopen:true` is correct whether or not the day is closed: the user named
+  // this specific day, which is exactly the deliberate act the flag denotes.
+  // For an open day openWorkDate() clears the slots and leaves reopenDate null.
+  //
+  // `pull:false` because the login chain below pulls anyway — and it must be
+  // that pull, not openWorkDate's, since only pullFromFirebase() reports
+  // success back to the push decision. Ordering still matters: S.workDate is
+  // set here, synchronously, so the pull fetches this day's rows and not
+  // today's.
+  //
+  // Whether the day is REALLY closed is settled afterwards by
+  // reconcileOpenDay(), once the pull has brought the true ledger — S.ledger
+  // is only this device's cache until then, so it cannot be decided here.
+  if(pastDate){
+    openWorkDate(pastDate, {reopen:true, pull:false});
+  }else{
+    checkDayRollover();
+  }
   // Attach realtime subscriptions now that the role is known — init runs
   // before login with currentRole=null, so nothing was subscribed yet.
   if(fbEnabled){

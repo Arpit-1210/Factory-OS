@@ -365,7 +365,11 @@ export function updateOrderStatus(id, status){
         const stillToDeduct = Math.max(0,(item.qty||1)-alreadyAssigned);
         if(stillToDeduct>0){
           if(!S.fgTransfers) S.fgTransfers=[];
-          S.fgTransfers.push({id:uid(),date:todayStr(),from:'Packing',to:'Dispatch',product:key,productIn:key,qty:stillToDeduct,note:'Dispatch '+o.id+' — '+o.customer,auto:false});
+          // Dated to the open day, like every other fgTransfers row. With
+          // todayStr() a dispatch entered for a past day deducted Packing
+          // stock on today instead, so the past day's FG balance stayed high
+          // and stock disagreed with that day's sheet.
+          S.fgTransfers.push({id:uid(),date:S.workDate||todayStr(),from:'Packing',to:'Dispatch',product:key,productIn:key,qty:stillToDeduct,note:'Dispatch '+o.id+' — '+o.customer,auto:false});
         }
       });
     }

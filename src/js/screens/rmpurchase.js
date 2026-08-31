@@ -27,7 +27,7 @@ export function openRMPurchaseForm(){
   if(sel) sel.innerHTML=S.rm.map(r=>`<option value="${r.id}" data-unit="${r.unit}">${r.name} (${r.unit})</option>`).join('');
   const fil=document.getElementById('rmp-filter');
   if(fil) fil.innerHTML='<option value="all">All Materials</option>'+S.rm.map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
-  document.getElementById('rmp-date').value=todayStr();
+  document.getElementById('rmp-date').value=S.workDate||todayStr();
   // Pre-fill reorder from stock
   const firstRM=S.rm[0];
   if(firstRM){
@@ -55,7 +55,7 @@ export function saveRMPurchase(){
   if(!qty){alert('Enter quantity.');return;}
   const cost=parseFloat(document.getElementById('rmp-cost').value)||0;
   const note=document.getElementById('rmp-note').value.trim();
-  const date=document.getElementById('rmp-date').value||todayStr();
+  const date=document.getElementById('rmp-date').value||S.workDate||todayStr();
   const reorder=parseFloat(document.getElementById('rmp-reorder').value)||100;
 
   // Update reorder level in stock

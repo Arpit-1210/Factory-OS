@@ -138,7 +138,17 @@ function repaint(fromRemote){
 }
 
 /**
- * Move to `date` and load that day. The ONLY writer of S.workDate.
+ * Move to `date` and load that day.
+ *
+ * The only way to CHANGE the open day from outside this module. (Two writers
+ * of S.workDate remain, and neither is a transition: state.js decides the
+ * starting day during loadState(), before S exists, and app.js fills it in
+ * when it is empty. adoptWorkDate() below is the post-close advance.)
+ *
+ * This used to say "the ONLY writer of S.workDate", which was not true —
+ * core/auth.js assigned it directly on a past-date login and so skipped the
+ * ledger check, the banner and the persist. Accuracy here is load-bearing:
+ * the claim is what made that assignment look sanctioned.
  *
  * A closed day requires `opts.reopen` — landing on one implicitly (a midnight
  * rollover, a stale stored date snapping back) must give an empty day, while
@@ -147,6 +157,10 @@ function repaint(fromRemote){
  *
  * Returns false and moves nothing if a closed day was reached without
  * `reopen`, so callers can report it rather than silently doing something else.
+ *
+ * @param {{reopen?:boolean, pull?:boolean}} [opts]
+ *   reopen  this day was named deliberately, so a closed one may be opened
+ *   pull    false to skip the follow-up pull; the caller is pulling itself
  */
 export function openWorkDate(date, opts){
   opts = opts || {};
@@ -171,7 +185,11 @@ export function openWorkDate(date, opts){
   // Pull the day's own rows. Only for an open day — a closed day is already
   // fully described by its ledger entry, and re-pulling would drag the stale
   // operational rows back in.
-  if(!closed && typeof FactoryDB!=='undefined' && FactoryDB.isReady()){
+  //
+  // `opts.pull === false` is for the login path, which is about to pull as part
+  // of its own chain; two pulls for one day change would race, and only the
+  // login's own pull reports success back to the push decision.
+  if(opts.pull!==false && !closed && typeof FactoryDB!=='undefined' && FactoryDB.isReady()){
     try{
       Promise.resolve(FactoryDB.pull(S)).then(function(){
         // The pull brings the ledger with it, so a day that looked open a
