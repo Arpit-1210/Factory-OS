@@ -16,7 +16,7 @@
 //  goods went, instead of a parallel bookkeeping the stock screens cannot see.
 // ==================================================================
 
-import { getFGBalance, isOverdue } from '../core/calc.js';
+import { baseProductName, getFGBalance, isOverdue } from '../core/calc.js';
 import { fmtN, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
@@ -26,12 +26,24 @@ import { orderStatusBg, orderStatusColor, renderOrders } from '../screens/orders
 let assignProduct = null;
 let assignAvailable = 0;
 
-/** Orders that are still open and mention this product in their item list. */
+/**
+ * Orders that are still open and mention this product in their item list.
+ *
+ * Matched on the CATALOGUE name as well as the full one. Production logs a
+ * variant — "Chair A — Red" — but an order is written from the catalogue and
+ * says "Chair A", so searching the order text for the full variant name never
+ * matched: every coloured product showed "No open order lists this product"
+ * however much of it was sitting in Packing, and could not be assigned at all.
+ */
 function ordersWanting(product) {
-  const needle = String(product || '').toLowerCase();
+  const full = String(product || '').toLowerCase();
+  const base = baseProductName(product).toLowerCase();
   return (S.orders || [])
     .filter(o => o.status !== 'dispatched' && o.status !== 'cancelled')
-    .filter(o => String(o.items || '').toLowerCase().includes(needle));
+    .filter(o => {
+      const items = String(o.items || '').toLowerCase();
+      return items.includes(full) || (!!base && items.includes(base));
+    });
 }
 
 export function openAssignModal(product, available, source) {
@@ -99,6 +111,20 @@ export function confirmAssign(orderId) {
     note: `Assigned to ${order.customer || 'order ' + order.id}`,
     orderId,
   });
+
+  // ── TELL THE ORDER IT HAS BEEN PART-FILLED ──
+  //
+  // updateOrderStatus() reads `assignedItems` when the order is dispatched and
+  // moves only what has not been assigned yet. Nothing ever wrote it, so the
+  // assignment above was invisible to dispatch: the full order quantity came
+  // out of Packing a SECOND time. Assigning 5 and then dispatching removed 10
+  // for an order of 5, and the stock reconciled against nothing.
+  //
+  // Keyed by the catalogue name, because that is what o.fgItems carries and
+  // what dispatch looks the number up by.
+  const key = baseProductName(assignProduct);
+  if (!order.assignedItems) order.assignedItems = {};
+  order.assignedItems[key] = (order.assignedItems[key] || 0) + qty;
 
   persist();
   closeAssignModal();

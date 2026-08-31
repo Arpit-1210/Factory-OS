@@ -85,6 +85,21 @@ export function asOfDate(){ return S.workDate || todayStr(); }
  */
 function upTo(date, asOf){ return !date || date <= asOf; }
 
+/**
+ * The catalogue product behind a produced item.
+ *
+ * Production logs a variant name — "Chair A — Red" — while the FG catalogue,
+ * and therefore every order, knows it as "Chair A". Anything that has to line
+ * production up against an order has to cross that gap, and the split was
+ * written out separately in fgstock.js and inventory.js.
+ *
+ * The separator is an em dash with spaces, which is what production.js writes.
+ */
+export function baseProductName(name){
+  const s = String(name||'');
+  return s.includes(' — ') ? s.split(' — ')[0] : s;
+}
+
 export function getFGBalance(productName, stage, asOf){
   if(!S.fgStock) return 0;
   const cutoff = asOf || asOfDate();

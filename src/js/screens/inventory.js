@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { getFGBalance, getRMBalance } from '../core/calc.js';
+import { baseProductName, getFGBalance, getRMBalance } from '../core/calc.js';
 import { FG_STAGES } from '../core/config.js';
 import { fmt, fmtN, todayStr } from '../core/format.js';
 import { S } from '../core/state.js';
@@ -51,7 +51,7 @@ export function renderInventory(){
   const fgPipeline = ['Moulding','Finishing','Painting'].reduce((a,st)=>a+allProds.filter(p=>getFGCumulative(p,st)>0).length,0);
   const fgReady = allProds.filter(p=>getFGCumulative(p,'Packing')>0).length;
   const fgVal = allProds.reduce((a,p)=>{
-    const fg=S.fg.find(f=>f.name===p)||S.fg.find(f=>f.name===(p.includes(' — ')?p.split(' — ')[0]:p));
+    const fg=S.fg.find(f=>f.name===p)||S.fg.find(f=>f.name===baseProductName(p));
     const qty=FG_STAGES.reduce((b,st)=>b+getFGCumulative(p,st),0);
     return a+(fg?qty*fg.price:0);
   },0);
@@ -160,7 +160,7 @@ export function renderInventory(){
         const qtys = FG_STAGES.map(st=>getFGCumulative(p,st));
         const total = qtys.reduce((a,q2)=>a+q2,0);
         const everMade = getTotalEverProduced(p);
-        const baseName = p.includes(' — ')?p.split(' — ')[0]:p;
+        const baseName = baseProductName(p);
         const fg = S.fg.find(f=>f.name===p)||S.fg.find(f=>f.name===baseName);
         const val = fg?total*fg.price:0;
         // Recent transfers for this product
@@ -184,7 +184,7 @@ export function renderInventory(){
       }).join('')}
       </tbody></table>
       <div style="font-family:var(--mono);font-size:10px;color:var(--text4);margin-top:10px;text-align:right">
-        ${prodsWithStock.length} product${prodsWithStock.length!==1?'s':''} · Total value: ${fmt(prodsWithStock.reduce((a,p)=>{const qtys=FG_STAGES.map(st=>getFGCumulative(p,st));const total=qtys.reduce((b,q2)=>b+q2,0);const baseName=p.includes(' — ')?p.split(' — ')[0]:p;const fg=S.fg.find(f=>f.name===p)||S.fg.find(f=>f.name===baseName);return a+(fg?total*fg.price:0);},0))}
+        ${prodsWithStock.length} product${prodsWithStock.length!==1?'s':''} · Total value: ${fmt(prodsWithStock.reduce((a,p)=>{const qtys=FG_STAGES.map(st=>getFGCumulative(p,st));const total=qtys.reduce((b,q2)=>b+q2,0);const baseName=baseProductName(p);const fg=S.fg.find(f=>f.name===p)||S.fg.find(f=>f.name===baseName);return a+(fg?total*fg.price:0);},0))}
       </div>
       </div>`;
   }
