@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { getFGBalance } from '../core/calc.js';
+import { baseProductName, getFGBalance } from '../core/calc.js';
 import { FG_STAGES } from '../core/config.js';
 import { fmt, fmtN, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
@@ -59,7 +59,7 @@ export function renderFGStock(){
     const totalQty=stageProds.reduce((a,p)=>a+p.qty,0);
     const totalVal=stageProds.reduce((a,p)=>{
       // For colour variants like "Garden Pot L — Orange", look up base name
-      const baseName = p.name.includes(' — ') ? p.name.split(' — ')[0] : p.name;
+      const baseName = baseProductName(p.name);
       const fg=S.fg.find(f=>f.name===p.name)||S.fg.find(f=>f.name===baseName);
       return a+(fg?p.qty*fg.price:0);
     },0);
