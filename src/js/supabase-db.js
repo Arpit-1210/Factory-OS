@@ -315,6 +315,22 @@
     return out;
   }
 
+  // The snapshot's own state, read off the rows. Every row of one declaration
+  // carries the same as_of_date and locked flag, so the first row that has
+  // them speaks for the set; `locked` is true only if EVERY row is locked, so
+  // a half-written snapshot never reads as settled.
+  function rowsToFgOpening(rows) {
+    var list = rows || [];
+    if (!list.length) return { asOfDate: null, locked: false, lockedBy: null, lockedAt: null };
+    var dated = list.find(function (r) { return r.as_of_date; }) || {};
+    return {
+      asOfDate: dated.as_of_date ? String(dated.as_of_date).slice(0, 10) : null,
+      locked:   list.every(function (r) { return !!r.locked; }),
+      lockedBy: dated.locked_by || null,
+      lockedAt: dated.locked_at || null
+    };
+  }
+
   function fgStockToRows(obj) {
     var rows = [];
     Object.keys(obj || {}).forEach(function (stage) {
@@ -484,7 +500,10 @@
         };
       });
 
-      if (!res[7].error) S.fgStock = rowsToFgStock(res[7].data);
+      if (!res[7].error) {
+        S.fgStock   = rowsToFgStock(res[7].data);
+        S.fgOpening = rowsToFgOpening(res[7].data);
+      }
 
       // SAME FIRST-RUN GUARD AS THE CATALOGUES, AND FOR THE SAME REASON.
       // This used to overwrite S.ledger unconditionally. day_ledger is written
@@ -724,7 +743,14 @@
         };
       });
       await write('fg_transfers', xferRows, { onConflict: 'id' });
-      await write('fg_stock', fgStockToRows(S.fgStock), { onConflict: 'product,stage' });
+
+      // fg_stock is NOT pushed here any more.
+      //
+      // Opening stock is a one-time declaration by the owner, not shop-floor
+      // data. Re-pushing the whole table from every device on every sync meant
+      // a supervisor's phone — holding whatever it last pulled, possibly
+      // stale — could overwrite the owner's figures at any moment. It is now
+      // written only by saveOpeningStock(), and only by an owner (RLS).
 
       // delRaw() and the transfer screens remove rows from S only. push() was
       // upsert-only, so the row stayed in Postgres and the next pull put it
@@ -821,6 +847,59 @@
     } catch (e) { return null; }
   }
 
+  // ── OPENING STOCK ───────────────────────────────────────────────
+  // The owner's declaration of what the factory held on its go-live date.
+  // Written only here, and only by an owner — RLS refuses anyone else, and a
+  // trigger refuses everyone once the snapshot is locked.
+  //
+  // `replace` is deliberate: the screen submits the WHOLE table, so a product
+  // whose quantity was cleared to zero has to lose its row rather than keep
+  // the old figure. Zero rows are dropped, which is what makes "leave blank
+  // for nothing" mean the same as typing 0.
+  async function saveOpeningStock(fgStock, asOfDate, lock) {
+    if (!ready) return false;
+    var rows = fgStockToRows(fgStock)
+      .filter(function (r) { return r.qty > 0; })
+      .map(function (r) {
+        return { product: r.product, stage: r.stage, qty: r.qty,
+                 as_of_date: asOfDate || null, locked: !!lock };
+      });
+
+    // Clear the previous declaration first. Without this, a product removed
+    // from the table would keep its old opening quantity for ever — the upsert
+    // has no way to express a deletion.
+    try {
+      var del = await sb.from('fg_stock').delete().not('product', 'is', null);
+      if (del.error) {
+        console.error('[FactoryDB] opening stock: could not clear the previous ' +
+                      'declaration:', del.error.message);
+        return false;
+      }
+    } catch (e) {
+      console.error('[FactoryDB] opening stock clear:', e);
+      return false;
+    }
+
+    if (!rows.length) return true;          // an all-zero declaration is valid
+    return write('fg_stock', rows, { onConflict: 'product,stage' });
+  }
+
+  /** Unlock the snapshot for editing. Owner only; the trigger enforces it. */
+  async function setOpeningLock(locked) {
+    if (!ready) return false;
+    try {
+      var res = await sb.from('fg_stock').update({ locked: !!locked }).not('product', 'is', null);
+      if (res.error) {
+        console.error('[FactoryDB] opening stock lock:', res.error.message);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.error('[FactoryDB] opening stock lock:', e);
+      return false;
+    }
+  }
+
   // ── SAVE DAY ────────────────────────────────────────────────────
   // One row per day. No 1 MiB ceiling, unlike the old ledger[] array.
   async function saveDay(workDate, payload) {
@@ -884,6 +963,8 @@
     pull: pull,
     push: push,
     saveDay: saveDay,
+    saveOpeningStock: saveOpeningStock,
+    setOpeningLock: setOpeningLock,
     startSync: startSync,
     stopSync: stopSync,
     flushOutbox: flushOutbox,

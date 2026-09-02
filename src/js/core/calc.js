@@ -104,9 +104,16 @@ export function getFGBalance(productName, stage, asOf){
   if(!S.fgStock) return 0;
   const cutoff = asOf || asOfDate();
 
-  // 1. Manual opening stock set in setup. Undated by nature — it is the
-  //    balance everything else moves from, so it is always in scope.
-  const opening = (S.fgStock[stage]&&S.fgStock[stage][productName])||0;
+  // 1. The opening declaration — what was on the floor on the go-live date.
+  //    In scope only from that date onwards: before go-live the factory's
+  //    recorded history simply does not reach back, and counting the opening
+  //    balance there would report stock the business had not yet declared.
+  //    A declaration with no date (entered before this was dated, or seeded)
+  //    counts always, exactly as it used to.
+  const openingAsOf = (S.fgOpening && S.fgOpening.asOfDate) || null;
+  const opening = (!openingAsOf || openingAsOf <= cutoff)
+    ? ((S.fgStock[stage]&&S.fgStock[stage][productName])||0)
+    : 0;
 
   // 2. Production logged directly at this stage (open day + history).
   //    The open day's sessions belong to S.workDate, so they count only when

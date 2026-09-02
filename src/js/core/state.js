@@ -34,6 +34,10 @@ export function defaultState() {
     reopenDate: null,
     orders: [], stock: [], purchases: [],
     fgStock: {}, fgTransfers: [], fgAdjustments: [],
+    // The opening-stock declaration: what the factory held on its go-live
+    // date. `asOfDate` is what stops that quantity counting on days before it
+    // was true; `locked` is the owner having confirmed the figures.
+    fgOpening: { asOfDate: null, locked: false, lockedBy: null, lockedAt: null },
     dispatches: [], salaryAdj: {}, bom: {}, unitTransfers: [],
   };
 }
