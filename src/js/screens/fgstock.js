@@ -17,6 +17,7 @@
 // ==================================================================
 
 import { baseProductName, getFGBalance } from '../core/calc.js';
+import { renderOpeningNotice } from './fgopening.js';
 import { FG_STAGES } from '../core/config.js';
 import { fmt, fmtN, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
@@ -40,6 +41,7 @@ export function switchFGStage(stage){
   renderFGStock();
 }
 export function renderFGStock(){
+  try{ renderOpeningNotice(); }catch(e){}
   initFGStock();
   // Collect all products that have any stock across any stage
   const allProducts=new Set();

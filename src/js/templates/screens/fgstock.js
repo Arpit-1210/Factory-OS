@@ -7,6 +7,7 @@ export default `      <div class="screen" id="sc-fgstock">
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-amber" data-click="openFGTransfer">↔ Transfer</button>
             <button class="btn btn-sm" data-click="openFGAdjust">✏️ Adjust</button>
+            <button class="btn btn-sm" data-click="openOpeningStock" id="fgo-open-btn">📥 Opening Stock</button>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:16px;overflow-x:auto">
@@ -25,6 +26,64 @@ export default `      <div class="screen" id="sc-fgstock">
           <div class="tab" data-click="switchFGStage" data-args="[&quot;Painting&quot;]">🟢 Painting</div>
           <div class="tab" data-click="switchFGStage" data-args="[&quot;Packing&quot;]">🟣 Packing</div>
         </div>
+        <!-- A standing note when the factory has no opening declaration, or
+             when one has been drafted but never confirmed. Balances treat a
+             missing declaration as zero, which is a legitimate answer and an
+             easy one to arrive at by accident. -->
+        <div id="fgo-notice" style="display:none;margin-bottom:14px"></div>
+
+        <!-- ── OPENING STOCK ──
+             What the factory held on its go-live date. Entered once, confirmed,
+             and thereafter the fixed point every balance is measured from. -->
+        <div id="fgo-panel" style="display:none">
+          <div class="card" style="margin-bottom:16px">
+            <div class="ch">
+              <div class="ct">📥 Opening Stock</div>
+              <button class="btn btn-sm" data-click="closeOpeningStock">✕</button>
+            </div>
+            <div class="ibox">
+              What was physically on the floor at each stage on your go-live date.
+              Everything after it is calculated: opening + produced + transfers in
+              − transfers out. Leave a cell blank for nothing.
+            </div>
+            <div id="fgo-lockbar" style="display:none;margin-bottom:12px"></div>
+            <div class="fg fg2" style="margin-bottom:12px">
+              <div class="fld">
+                <label>Stock as of (go-live date)</label>
+                <input id="fgo-date" type="date">
+              </div>
+              <div class="fld">
+                <label>Import from a sheet</label>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <!-- The stylesheet hides every file input, so this one is
+                       opened by a real button — the same way the Setup
+                       screen's Excel importers work. -->
+                  <button class="btn btn-sm" data-click="pickOpeningFile" style="flex:1;min-width:130px">📊 Choose sheet</button>
+                  <button class="btn btn-sm" data-click="dlSampleOpening">⬇ Template</button>
+                  <input type="file" id="fgo-file" accept=".xlsx,.xls,.csv" data-change="uploadOpeningStock">
+                </div>
+              </div>
+            </div>
+            <div id="fgo-status"></div>
+            <div class="tw" style="max-height:420px;overflow:auto">
+              <table class="tbl" id="fgo-table">
+                <thead><tr>
+                  <th>Product</th>
+                  <th class="num">Moulding</th><th class="num">Finishing</th>
+                  <th class="num">Painting</th><th class="num">Packing</th>
+                  <th class="num">Total</th>
+                </tr></thead>
+                <tbody id="fgo-body"></tbody>
+              </table>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap">
+              <button class="btn btn-sm" data-click="clearOpeningStock" id="fgo-clear">Clear all</button>
+              <button class="btn btn-amber" data-click="confirmOpeningStock" id="fgo-confirm">✓ Confirm &amp; Lock</button>
+              <button class="btn btn-sm" data-click="unlockOpeningStock" id="fgo-unlock" style="display:none">🔓 Unlock to edit</button>
+            </div>
+          </div>
+        </div>
+
         <div id="fg-stock-content"></div>
         <div id="fg-transfer-form" style="display:none">
           <div class="card" style="max-width:540px">
