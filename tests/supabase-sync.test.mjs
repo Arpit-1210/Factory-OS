@@ -237,7 +237,10 @@ describe('FactoryDB.push — role decides what may be written', () => {
     await pushClaimed(DB, s, 'rm');
 
     const tables = new Set(sb._writes.map(w => w.table));
-    assert.deepEqual([...tables].sort(), ['fg_stock', 'fg_transfers', 'raw_log']);
+    // fg_stock is absent on purpose: opening stock is the owner's declaration,
+    // written only by saveOpeningStock(). Every device re-pushing it was how a
+    // stale supervisor cache could overwrite the owner's figures.
+    assert.deepEqual([...tables].sort(), ['fg_transfers', 'raw_log']);
     sameShape(rowsFor(sb, 'fg_transfers')[0], {
       id: 3, work_date: '2026-08-19', product: 'Chair A',
       from_stage: 'Moulding', to_stage: 'Finishing', qty: 4, logged_by: null,
@@ -421,14 +424,12 @@ describe('FactoryDB — fg_stock column mapping', () => {
   test('writes the product into product and the stage into stage', async () => {
     const { DB, sb } = bootDB();
     await DB.init();
-    await pushClaimed(DB, {
-      workDate: '2026-08-19',
-      fgStock: { Packing: { 'Chair A': 12 } },   // [stage][product], as app.js builds it
-      lab: [], sessions: [], rawLog: [], fgTransfers: [],
-    }, 'rm');
+    // Through saveOpeningStock(), which is the only writer of this table now.
+    await DB.saveOpeningStock({ Packing: { 'Chair A': 12 } }, '2026-08-01', false);
 
     const row = rowsFor(sb, 'fg_stock')[0];
-    sameShape(row, { product: 'Chair A', stage: 'Packing', qty: 12 });
+    sameShape(row, { product: 'Chair A', stage: 'Packing', qty: 12,
+                     as_of_date: '2026-08-01', locked: false });
   });
 
   test('survives a full round trip through Postgres unchanged', async () => {
@@ -438,13 +439,11 @@ describe('FactoryDB — fg_stock column mapping', () => {
     // what pins the orientation. This checks the pair still composes.
     const { DB, sb } = bootDB();
     await DB.init();
-    await pushClaimed(DB, {
-      workDate: '2026-08-19', fgStock: { Packing: { 'Chair A': 12 } },
-      lab: [], sessions: [], rawLog: [], fgTransfers: [],
-    }, 'rm');
+    await DB.saveOpeningStock({ Packing: { 'Chair A': 12 } }, '2026-08-01', false);
 
     const stored = rowsFor(sb, 'fg_stock');
-    sameShape(stored, [{ product: 'Chair A', stage: 'Packing', qty: 12 }]);
+    sameShape(stored, [{ product: 'Chair A', stage: 'Packing', qty: 12,
+                        as_of_date: '2026-08-01', locked: false }]);
 
     const back = bootDB({ tables: { fg_stock: stored } });
     await back.DB.init();

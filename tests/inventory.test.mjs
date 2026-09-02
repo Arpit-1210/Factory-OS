@@ -216,11 +216,15 @@ describe('fg_stock rows reach getFGBalance with the right orientation', () => {
     const before = ['Moulding', 'Packing'].map(st =>
       ['Chair A', 'Table B'].map(p => call(h.ctx, `getFGBalance(${JSON.stringify(p)}, ${JSON.stringify(st)})`)));
 
-    // Round trip the state through the row mappers.
+    // Round trip the state through the row mappers. Opening stock goes out
+    // through saveOpeningStock() — push() no longer writes fg_stock, because a
+    // stale device re-pushing it could overwrite the owner's declaration.
     const rows = [];
     const h2 = boot({ supabase: {
       createClient: () => ({
         from: () => ({ select: () => ({ eq: () => ({ order: () => ({ then: (r) => Promise.resolve({ data: [], error: null }).then(r) }) }) }),
+                       delete() { return this; }, update() { return this; },
+                       not: () => Promise.resolve({ data: [], error: null }),
                        upsert: (rs) => { rows.push(...rs); return Promise.resolve({ data: rs, error: null }); } }),
         auth: { getSession: () => Promise.resolve({ data: { session: null } }), signOut: () => Promise.resolve({}) },
         channel: () => { const ch = { on: () => ch, subscribe: () => ch }; return ch; },
@@ -228,8 +232,7 @@ describe('fg_stock rows reach getFGBalance with the right orientation', () => {
       }),
     } });
     await h2.win.FactoryDB.init();
-    await h2.win.FactoryDB.push({ workDate: '2026-08-19', fgStock: JSON.parse(JSON.stringify(S.fgStock)),
-                                  lab: [], sessions: [], rawLog: [], fgTransfers: [] }, 'rm');
+    await h2.win.FactoryDB.saveOpeningStock(JSON.parse(JSON.stringify(S.fgStock)), '2026-08-01', false);
 
     const h3 = boot({ supabase: fakeSupabase(rows.filter(r => r.product && r.stage)) });
     await h3.win.FactoryDB.init();
