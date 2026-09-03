@@ -50,25 +50,50 @@ begin
       using errcode = 'check_violation';
   end if;
 
-  -- Replaces the previous declaration wholesale. A product dropped from the
-  -- table has to lose its row; an upsert cannot express that.
+  -- ── WHY THIS IS NOT `delete from fg_stock` ──
   --
-  -- The WHERE is not decoration. Supabase runs with sql_safe_updates on, so an
-  -- unqualified DELETE is rejected outright with 21000 "DELETE requires a
-  -- WHERE clause" — the statement never runs. `product` is a NOT NULL part of
-  -- the primary key, so this predicate matches every row while satisfying that
-  -- guard. Caught only by running against the real database: a stubbed client
-  -- has no such rule and reported the save as fine.
-  delete from fg_stock where product is not null;
+  -- Supabase preloads the safeupdate extension, which refuses an unqualified
+  -- DELETE outright: 21000, "DELETE requires a WHERE clause". The statement
+  -- never runs, so every save failed and opening stock could not be declared
+  -- at all. A stubbed client has no such rule, which is why only a run against
+  -- the real database caught it.
+  --
+  -- A token predicate is not enough either. `where product is not null` reads
+  -- like a WHERE, but `product` is NOT NULL, so the planner can prove it always
+  -- true and drop it — leaving exactly the unqualified scan the guard rejects.
+  -- The correlated NOT EXISTS below cannot be folded away, because whether a
+  -- row survives genuinely depends on the payload.
+  --
+  -- It is also simply the better statement: it removes only the rows this
+  -- declaration drops, instead of churning every row to rewrite the same
+  -- numbers.
+  delete from fg_stock f
+   where not exists (
+     select 1
+       from jsonb_array_elements(coalesce(rows_in, '[]'::jsonb)) r
+      where r->>'product' = f.product
+        and r->>'stage'   = f.stage
+        and coalesce((r->>'qty')::numeric, 0) > 0
+   );
 
-  insert into fg_stock (product, stage, qty, as_of_date, locked)
+  -- Everything still declared, written or rewritten. Zero means "no row", so
+  -- those never arrive here and were removed above.
+  --
+  -- The lock triggers still fire on both statements: re-saving over a locked
+  -- declaration raises, and this whole function rolls back with the existing
+  -- figures untouched.
+  insert into fg_stock as t (product, stage, qty, as_of_date, locked)
   select r->>'product',
          r->>'stage',
          (r->>'qty')::numeric,
          as_of,
          coalesce(lock_it, false)
     from jsonb_array_elements(coalesce(rows_in, '[]'::jsonb)) r
-   where coalesce((r->>'qty')::numeric, 0) > 0;   -- zero means "no row"
+   where coalesce((r->>'qty')::numeric, 0) > 0
+      on conflict (product, stage) do update
+     set qty        = excluded.qty,
+         as_of_date = excluded.as_of_date,
+         locked     = excluded.locked;
 
   get diagnostics written = row_count;
   return written;
