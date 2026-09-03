@@ -65,6 +65,17 @@ export default `      <div class="screen" id="sc-fgstock">
               </div>
             </div>
             <div id="fgo-status"></div>
+            <!-- A real catalogue runs to hundreds of products. Without a search
+                 the owner scrolls thousands of pixels to reach each one. -->
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+              <input id="fgo-search" type="search" placeholder="Search products…" data-input="filterOpeningStock"
+                     style="flex:1;min-width:180px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface2);color:var(--text)">
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text4);white-space:nowrap;cursor:pointer">
+                <input type="checkbox" id="fgo-only-filled" data-change="toggleOpeningFilled" style="cursor:pointer">
+                Only rows with a quantity
+              </label>
+            </div>
+            <div id="fgo-count" style="font-size:11px;color:var(--text4);font-family:var(--mono);margin-bottom:6px"></div>
             <div class="tw" style="max-height:420px;overflow:auto">
               <table class="tbl" id="fgo-table">
                 <thead><tr>

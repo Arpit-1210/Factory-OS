@@ -37,6 +37,14 @@ import { downloadXLSX } from '../core/xlsx.js';
 /** Working copy while the panel is open: {stage: {product: qty}}. */
 let draft = null;
 
+// ── FINDING A PRODUCT IN A REAL CATALOGUE ──
+// This factory's catalogue is ~380 products. Rendering every one gave 1,520
+// inputs, 480KB of markup and 15,000px of scrolling in a 420px window — about
+// 36 screens to reach one product, with no way to search. A table that lists
+// everything is only reasonable for a short list.
+let filterText = '';
+let onlyFilled = false;
+
 const stages = () => (FG_STAGES && FG_STAGES.length ? FG_STAGES
   : ['Moulding', 'Finishing', 'Painting', 'Packing']);
 
@@ -47,6 +55,33 @@ function meta(){
 /** Every product the declaration can mention: the catalogue, in order. */
 function products(){
   return (S.fg || []).map(f => f.name);
+}
+
+/** The subset currently on screen. Row identity still comes from the FULL
+ *  catalogue index (see cellId), so filtering never renumbers a cell. */
+function visibleProducts(){
+  const q = filterText.trim().toLowerCase();
+  return products().filter(p => {
+    if (q && !p.toLowerCase().includes(q)) return false;
+    if (onlyFilled && !stages().some(st => (draft && draft[st] && draft[st][p]) > 0)) return false;
+    return true;
+  });
+}
+
+/** Narrow the table. Values already typed are kept — harvest() reads them from
+ *  the draft when a row is not on screen, so filtering never loses an entry. */
+export function filterOpeningStock(){
+  harvest();
+  filterText = (document.getElementById('fgo-search') || {}).value || '';
+  renderOpeningStock();
+}
+
+/** Show only the products that have something in them — the review pass. */
+export function toggleOpeningFilled(){
+  harvest();
+  const el = document.getElementById('fgo-only-filled');
+  onlyFilled = !!(el && el.checked);
+  renderOpeningStock();
 }
 
 function blankDraft(){
@@ -67,6 +102,12 @@ function draftFromState(){
 
 export function openOpeningStock(){
   draft = draftFromState();
+  filterText = '';
+  onlyFilled = false;
+  const searchEl = document.getElementById('fgo-search');
+  if (searchEl) searchEl.value = '';
+  const filledEl = document.getElementById('fgo-only-filled');
+  if (filledEl) filledEl.checked = false;
   const panel = document.getElementById('fgo-panel');
   if (panel) panel.style.display = 'block';
   const dateEl = document.getElementById('fgo-date');
@@ -116,7 +157,7 @@ export function renderOpeningStock(){
   if (!draft) draft = draftFromState();
 
   const locked = !!meta().locked;
-  const list = products();
+  const list = visibleProducts();
 
   body.innerHTML = list.length ? list.map(p => {
     const cells = stages().map(st => {
@@ -132,23 +173,39 @@ export function renderOpeningStock(){
       <td class="num" style="font-weight:700;color:${total > 0 ? 'var(--jade,#065F46)' : 'var(--text4)'}">${total > 0 ? fmtN(total) : '—'}</td></tr>`;
   }).join('')
     : `<tr><td colspan="6" style="color:var(--text4);font-size:12px">
-         No products in the catalogue yet. Add them under Settings → Setup first.</td></tr>`;
+         ${products().length
+           ? 'No product matches that search.'
+           : 'No products in the catalogue yet. Add them under Settings → Setup first.'}</td></tr>`;
 
+  paintCount(list.length);
   paintLockBar();
   paintButtons();
+}
+
+/** How much of the catalogue is on screen, and how much is entered. */
+function paintCount(shown){
+  const el = document.getElementById('fgo-count');
+  if (!el) return;
+  const total = products().length;
+  let filled = 0;
+  products().forEach(p => {
+    if (stages().some(st => (draft && draft[st] && draft[st][p]) > 0)) filled++;
+  });
+  el.textContent = 'Showing ' + shown + ' of ' + total + ' products · ' +
+                   filled + ' with a quantity';
 }
 
 /** Keep the running total honest as the owner types. */
 export function onOpeningCell(){
   harvest();
-  const list = products();
-  list.forEach(p => {
-    const total = stages().reduce((a, st) => a + ((draft[st] && draft[st][p]) || 0), 0);
-    void total;   // totals are repainted wholesale below
-  });
+  // The VISIBLE list, because that is what the rows correspond to. Indexing
+  // into the full catalogue would write each total onto the wrong row as soon
+  // as a filter is applied.
+  const list = visibleProducts();
   // Repaint totals only — re-rendering the inputs would steal focus mid-typing.
   const body = document.getElementById('fgo-body');
   if (!body || !body.children) return;
+  paintCount(list.length);
   list.forEach((p, i) => {
     const row = body.children[i];
     if (!row || !row.children) return;

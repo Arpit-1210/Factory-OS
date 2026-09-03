@@ -119,6 +119,79 @@ describe('entering the declaration', () => {
   });
 });
 
+describe('finding a product in a real catalogue', () => {
+  // The live catalogue is ~380 products. Rendering all of them gave 1,520
+  // inputs and 15,000px of scrolling in a 420px window — about 36 screens to
+  // reach one product, with no way to search.
+  const many = () => {
+    const fg = [];
+    for (let i = 1; i <= 40; i++) fg.push({ id: i, name: 'Garden Pot ' + i, price: 100 });
+    fg.push({ id: 99, name: 'Planter Box', price: 200 });
+    const S = fresh({ fg });
+    call(ctx, 'setRole("owner")');
+    call(ctx, 'openOpeningStock()');
+    return S;
+  };
+  const shownProducts = () => {
+    const html = document.getElementById('fgo-body').innerHTML;
+    return (html.match(/<td style="font-weight:500">([^<]*)<\/td>/g) || [])
+      .map(m => m.replace(/<[^>]*>/g, ''));
+  };
+  const search = (q) => {
+    document.getElementById('fgo-search').value = q;
+    call(ctx, 'filterOpeningStock()');
+  };
+
+  test('a search narrows the table', () => {
+    many();
+    assert.equal(shownProducts().length, 41, 'everything to begin with');
+
+    search('planter');
+
+    assert.deepEqual(shownProducts(), ['Planter Box']);
+    assert.match(document.getElementById('fgo-count').textContent, /Showing 1 of 41/);
+  });
+
+  test('a quantity typed before searching is NOT lost when the row is filtered away', () => {
+    // The row leaves the DOM entirely, so the value has to be read back from
+    // the draft rather than from a cell that no longer exists.
+    const S = many();
+    cell('Packing', 0).value = '9';         // Garden Pot 1
+    call(ctx, 'onOpeningCell()');
+
+    search('planter');                       // Garden Pot 1 is now off screen
+    assert.deepEqual(shownProducts(), ['Planter Box']);
+
+    search('');                              // and back
+    assert.equal(rendered('Packing', 0), '9', 'the quantity survived the round trip');
+
+    document.getElementById('fgo-date').value = '2026-08-01';
+    return call(ctx, 'confirmOpeningStock()').then(() => {
+      assert.equal(JSON.parse(JSON.stringify(S.fgStock.Packing))['Garden Pot 1'], 9,
+        'and reaches the saved declaration');
+    });
+  });
+
+  test('"only rows with a quantity" is the review pass', () => {
+    many();
+    cell('Packing', 0).value = '5';
+    call(ctx, 'onOpeningCell()');
+
+    document.getElementById('fgo-only-filled').checked = true;
+    call(ctx, 'toggleOpeningFilled()');
+
+    assert.deepEqual(shownProducts(), ['Garden Pot 1']);
+    assert.match(document.getElementById('fgo-count').textContent, /1 with a quantity/);
+  });
+
+  test('a search matching nothing says so', () => {
+    many();
+    search('zzzz');
+    assert.equal(shownProducts().length, 0);
+    assert.match(document.getElementById('fgo-body').innerHTML, /No product matches/);
+  });
+});
+
 describe('confirm and lock', () => {
   test('a confirmed declaration is dated, locked and mirrored into state', async () => {
     const S = fresh();
