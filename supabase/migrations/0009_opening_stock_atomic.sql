@@ -52,7 +52,14 @@ begin
 
   -- Replaces the previous declaration wholesale. A product dropped from the
   -- table has to lose its row; an upsert cannot express that.
-  delete from fg_stock;
+  --
+  -- The WHERE is not decoration. Supabase runs with sql_safe_updates on, so an
+  -- unqualified DELETE is rejected outright with 21000 "DELETE requires a
+  -- WHERE clause" — the statement never runs. `product` is a NOT NULL part of
+  -- the primary key, so this predicate matches every row while satisfying that
+  -- guard. Caught only by running against the real database: a stubbed client
+  -- has no such rule and reported the save as fine.
+  delete from fg_stock where product is not null;
 
   insert into fg_stock (product, stage, qty, as_of_date, locked)
   select r->>'product',
