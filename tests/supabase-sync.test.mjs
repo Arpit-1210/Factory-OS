@@ -8,6 +8,7 @@ import { boot, bootDb } from './harness.mjs';
 // ── FAKE SUPABASE CLIENT ────────────────────────────────────────────
 function fakeSupabase({ tables = {}, failOn = [], user = null, role = 'owner' } = {}) {
   const writes = [];          // every upsert that reached "Postgres"
+  const rpcs = [];            // every stored-procedure call
 
   const query = (table) => {
     const q = {
@@ -50,8 +51,19 @@ function fakeSupabase({ tables = {}, failOn = [], user = null, role = 'owner' } 
 
   return {
     _writes: writes,
+    _rpcs: rpcs,
     createClient: () => ({
       from: query,
+      // Opening stock goes through save_opening_stock(), which does the
+      // delete-and-insert in one transaction. Record the call so a test can
+      // assert what would actually reach Postgres.
+      rpc: (fn, params) => {
+        rpcs.push({ fn, params });
+        if (failOn.includes(fn)) {
+          return Promise.resolve({ data: null, error: { message: 'RLS denied', code: '42501' } });
+        }
+        return Promise.resolve({ data: (params && params.rows_in || []).length, error: null });
+      },
       auth: {
         getSession: () => Promise.resolve({ data: { session: user ? { user } : null } }),
         signInWithPassword: ({ email }) =>
@@ -237,7 +249,10 @@ describe('FactoryDB.push — role decides what may be written', () => {
     await pushClaimed(DB, s, 'rm');
 
     const tables = new Set(sb._writes.map(w => w.table));
-    assert.deepEqual([...tables].sort(), ['fg_stock', 'fg_transfers', 'raw_log']);
+    // fg_stock is absent on purpose: opening stock is the owner's declaration,
+    // written only by saveOpeningStock(). Every device re-pushing it was how a
+    // stale supervisor cache could overwrite the owner's figures.
+    assert.deepEqual([...tables].sort(), ['fg_transfers', 'raw_log']);
     sameShape(rowsFor(sb, 'fg_transfers')[0], {
       id: 3, work_date: '2026-08-19', product: 'Chair A',
       from_stage: 'Moulding', to_stage: 'Finishing', qty: 4, logged_by: null,
@@ -421,14 +436,24 @@ describe('FactoryDB — fg_stock column mapping', () => {
   test('writes the product into product and the stage into stage', async () => {
     const { DB, sb } = bootDB();
     await DB.init();
-    await pushClaimed(DB, {
-      workDate: '2026-08-19',
-      fgStock: { Packing: { 'Chair A': 12 } },   // [stage][product], as app.js builds it
-      lab: [], sessions: [], rawLog: [], fgTransfers: [],
-    }, 'rm');
+    // Through saveOpeningStock(), which is the only writer of this table now,
+    // and which goes via the atomic RPC rather than a delete-then-insert pair.
+    await DB.saveOpeningStock({ Packing: { 'Chair A': 12 } }, '2026-08-01', false);
 
-    const row = rowsFor(sb, 'fg_stock')[0];
-    sameShape(row, { product: 'Chair A', stage: 'Packing', qty: 12 });
+    assert.equal(sb._rpcs.length, 1, 'one call, not a delete followed by an insert');
+    assert.equal(sb._rpcs[0].fn, 'save_opening_stock');
+    sameShape(sb._rpcs[0].params.rows_in[0], { product: 'Chair A', stage: 'Packing', qty: 12 });
+    assert.equal(sb._rpcs[0].params.as_of, '2026-08-01');
+    assert.equal(sb._rpcs[0].params.lock_it, false);
+  });
+
+  test('a refused save reports failure rather than claiming success', async () => {
+    // The whole reason the write is atomic: a half-applied declaration would
+    // leave the factory with no opening stock at all.
+    const { DB } = bootDB({ failOn: ['save_opening_stock'] });
+    await DB.init();
+    const ok = await DB.saveOpeningStock({ Packing: { 'Chair A': 12 } }, '2026-08-01', true);
+    assert.equal(ok, false);
   });
 
   test('survives a full round trip through Postgres unchanged', async () => {
@@ -438,13 +463,13 @@ describe('FactoryDB — fg_stock column mapping', () => {
     // what pins the orientation. This checks the pair still composes.
     const { DB, sb } = bootDB();
     await DB.init();
-    await pushClaimed(DB, {
-      workDate: '2026-08-19', fgStock: { Packing: { 'Chair A': 12 } },
-      lab: [], sessions: [], rawLog: [], fgTransfers: [],
-    }, 'rm');
+    await DB.saveOpeningStock({ Packing: { 'Chair A': 12 } }, '2026-08-01', false);
 
-    const stored = rowsFor(sb, 'fg_stock');
-    sameShape(stored, [{ product: 'Chair A', stage: 'Packing', qty: 12 }]);
+    // What the RPC would write, shaped as the rows Postgres ends up holding.
+    const stored = sb._rpcs[0].params.rows_in.map(r => Object.assign({}, r,
+      { as_of_date: '2026-08-01', locked: false }));
+    sameShape(stored, [{ product: 'Chair A', stage: 'Packing', qty: 12,
+                        as_of_date: '2026-08-01', locked: false }]);
 
     const back = bootDB({ tables: { fg_stock: stored } });
     await back.DB.init();

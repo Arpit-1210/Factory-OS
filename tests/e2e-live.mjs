@@ -34,8 +34,10 @@ import { boot, call, getState } from './harness.mjs';
 //   E2E_EMAIL=... E2E_PASSWORD=... node tests/e2e-live.mjs
 //
 // It writes attendance and a production session for TODAY, closes the day, and
-// leaves a row in day_ledger. Snapshot those tables first if the day matters,
-// or run it against an account and date you do not mind disturbing.
+// leaves a row in day_ledger. Step 5 also REPLACES fg_stock — the factory's
+// opening-stock declaration — and leaves it unlocked. Snapshot those tables
+// first if the day or the declaration matters, or run it against an account
+// and date you do not mind disturbing.
 const EMAIL = process.env.E2E_EMAIL;
 const PASSWORD = process.env.E2E_PASSWORD;
 if (!EMAIL || !PASSWORD) {

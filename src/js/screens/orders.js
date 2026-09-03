@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { isOverdue } from '../core/calc.js';
+import { getFGBalance, isOverdue } from '../core/calc.js';
 import { argsAttr, fmt, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { sendGet } from '../core/sheets-sync.js';
@@ -354,6 +354,35 @@ export function updateOrderStatus(id, status){
   const o = S.orders.find(o=>o.id===id);
   if(!o) return;
   const prev = o.status;
+
+  // ── YOU CANNOT DISPATCH WHAT YOU DO NOT HAVE ──
+  //
+  // The transfer screen and the assign modal both refuse a move larger than
+  // the Packing balance. This path did not: it wrote the deduction unchecked,
+  // so dispatching an order the floor could not actually fill drove Packing
+  // negative in the movement history (getFGBalance clamps the DISPLAY at zero,
+  // which is precisely what made it invisible) and the shortfall surfaced
+  // later as stock that would not reconcile.
+  //
+  // Checked BEFORE the status is changed, so a refusal leaves the order
+  // exactly as it was rather than half-dispatched.
+  if(status==='dispatched' && prev!=='dispatched' && o.fgItems && o.fgItems.length){
+    const short = [];
+    o.fgItems.forEach(item=>{
+      const key = item.name;
+      const need = Math.max(0,(item.qty||1)-((o.assignedItems||{})[key]||0));
+      if(need<=0) return;
+      const have = getFGBalance(key,'Packing');
+      if(need>have) short.push(`${key}: need ${need}, ${have} in Packing`);
+    });
+    if(short.length){
+      alert('Cannot dispatch this order — not enough finished stock in Packing:\n\n'+
+            short.join('\n')+
+            '\n\nLog the remaining production, or assign what is available first.');
+      return false;
+    }
+  }
+
   o.status = status;
   o.statusUpdatedAt = S.workDate||todayStr();
 

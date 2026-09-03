@@ -41,6 +41,7 @@ import * as day from '../screens/day.js';
 import * as dispatchScreen from '../screens/dispatch.js';
 import * as docs from '../screens/docs.js';
 import * as exportsScreen from '../screens/exports.js';
+import * as fgopening from '../screens/fgopening.js';
 import * as fgstock from '../screens/fgstock.js';
 import * as inventory from '../screens/inventory.js';
 import * as month from '../screens/month.js';
@@ -72,7 +73,7 @@ import * as sheetsSync from './sheets-sync.js';
  */
 const ACTIONS = Object.assign(
   Object.create(null),
-  att, bom, dashboard, day, dispatchScreen, docs, exportsScreen, fgstock, inventory,
+  att, bom, dashboard, day, dispatchScreen, docs, exportsScreen, fgopening, fgstock, inventory,
   month, orders, payments, production, raw, rmpurchase, salary, setup, sheets,
   stock, transfers,
   assignModal, sidebar,

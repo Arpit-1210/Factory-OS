@@ -10,3 +10,6 @@ dist/
 # Local Claude Code settings and launch config
 .claude/
 scratchpad/
+
+# Supabase CLI scratch
+supabase/.temp/
