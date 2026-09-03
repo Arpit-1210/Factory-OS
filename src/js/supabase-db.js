@@ -858,30 +858,38 @@
   // for nothing" mean the same as typing 0.
   async function saveOpeningStock(fgStock, asOfDate, lock) {
     if (!ready) return false;
-    var rows = fgStockToRows(fgStock)
-      .filter(function (r) { return r.qty > 0; })
-      .map(function (r) {
-        return { product: r.product, stage: r.stage, qty: r.qty,
-                 as_of_date: asOfDate || null, locked: !!lock };
-      });
+    var rows = fgStockToRows(fgStock).filter(function (r) { return r.qty > 0; });
 
-    // Clear the previous declaration first. Without this, a product removed
-    // from the table would keep its old opening quantity for ever — the upsert
-    // has no way to express a deletion.
+    // ONE call, not a delete followed by an insert.
+    //
+    // Replacing a declaration means removing the old rows and writing the new
+    // ones, and a product dropped from the table has to lose its row — an
+    // upsert cannot express that. Done as two requests there was a window in
+    // which the factory's opening stock did not exist, and an insert that
+    // failed after the delete had succeeded left it that way: gone from
+    // Postgres, with the only copy in whichever browser tab was still open.
+    //
+    // save_opening_stock() does both inside one transaction, re-checks that
+    // the caller is an owner (definer rights mean the table's policy no longer
+    // applies), and refuses to overwrite a locked declaration — leaving the
+    // existing figures untouched when it does.
     try {
-      var del = await sb.from('fg_stock').delete().not('product', 'is', null);
-      if (del.error) {
-        console.error('[FactoryDB] opening stock: could not clear the previous ' +
-                      'declaration:', del.error.message);
+      var res = await sb.rpc('save_opening_stock', {
+        rows_in: rows, as_of: asOfDate || null, lock_it: !!lock
+      });
+      if (res.error) {
+        lastWriteError = {
+          table: 'fg_stock', code: res.error.code, message: res.error.message,
+          hint: 'opening stock was not saved', at: Date.now()
+        };
+        console.error('[FactoryDB] opening stock:', res.error.message);
         return false;
       }
+      return true;
     } catch (e) {
-      console.error('[FactoryDB] opening stock clear:', e);
+      console.error('[FactoryDB] opening stock:', e);
       return false;
     }
-
-    if (!rows.length) return true;          // an all-zero declaration is valid
-    return write('fg_stock', rows, { onConflict: 'product,stage' });
   }
 
   /** Unlock the snapshot for editing. Owner only; the trigger enforces it. */
