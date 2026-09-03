@@ -190,6 +190,16 @@ export default `<!-- ── LOGIN ── -->
       <button class="btn" data-click="returnToToday" style="padding:4px 12px;font-size:11px">Back to today</button>
     </div>
 
+    <!-- A past day that was left open and never closed. Signing in with no date
+         goes to today, so without this the day would simply go unmentioned —
+         absent from Monthly and payroll, its rows stranded under a date nothing
+         asks about. -->
+    <div id="unclosed-banner" style="display:none;align-items:center;gap:12px;padding:8px 16px;background:rgba(59,130,246,.12);border-bottom:1px solid var(--blue,#3B82F6);font-size:12px;color:var(--blue,#3B82F6)">
+      <span id="unclosed-banner-text" style="flex:1"></span>
+      <button class="btn" id="unclosed-banner-open" data-click="openUnclosedDay" data-args="[]" style="padding:4px 12px;font-size:11px">Open that day</button>
+      <button class="btn" data-click="dismissUnclosedDay" style="padding:4px 10px;font-size:11px">Dismiss</button>
+    </div>
+
     <div class="screens">
 
       <!-- ══ DASHBOARD ══ -->

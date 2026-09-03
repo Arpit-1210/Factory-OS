@@ -297,3 +297,129 @@ describe('what gets recorded while logged in on a past date', () => {
       'otherwise the open day is filtered out of its own payroll');
   });
 });
+
+describe('login with NO date chosen opens today', () => {
+  // An empty field used to mean "whatever day this device was left on".
+  // S.workDate is restored from localStorage and loadState() deliberately keeps
+  // an unclosed past day open, so signing in blank could land on last week and
+  // a shift got recorded there without anyone choosing it.
+  const seedOn = (day, extra = {}) => ({
+    frp_factory_v5: JSON.stringify(Object.assign({
+      workDate: day, ledger: [], lab: [], sessions: [],
+    }, extra)),
+  });
+
+  test('a stale open day from last week is not resumed', () => {
+    const stale = daysAgo(4);
+    const h = boot({ localStorageSeed: seedOn(stale) });
+    const S = getState(h.ctx);
+    assert.equal(S.workDate, stale, 'the device really was left on that day');
+
+    loginOn(h, '');                       // nothing chosen
+
+    assert.equal(S.workDate, today(), 'signing in blank starts today');
+    assert.ok(!S.reopenDate);
+  });
+
+  test('a closed-and-reopened past day is not resumed either', () => {
+    const stale = daysAgo(4);
+    const h = boot({ localStorageSeed: seedOn(stale, {
+      reopenDate: stale,
+      ledger: [{ date: stale, sessions: [], rawLog: [], attendance: [] }],
+    }) });
+    const S = getState(h.ctx);
+
+    loginOn(h, '');
+
+    assert.equal(S.workDate, today());
+    assert.ok(!S.reopenDate, 'and it is no longer treated as editing history');
+  });
+
+  test('a today that is already closed moves on rather than reopening it', () => {
+    const h = boot({ localStorageSeed: seedOn(daysAgo(2), {
+      ledger: [{ date: today(), sessions: [], rawLog: [], attendance: [] }],
+    }) });
+    const S = getState(h.ctx);
+
+    loginOn(h, '');
+
+    assert.notEqual(S.workDate, daysAgo(2));
+    assert.ok(S.workDate > today(), 'lands on the next day that is not closed');
+    assert.ok(!S.reopenDate, 'a fresh day, not reopened history');
+  });
+
+  test('an unclosed day left behind is reported, not buried', () => {
+    // Moving to today must not silently strand a real shift: an unclosed day
+    // has no ledger row, so it is absent from Monthly and payroll while its
+    // rows sit in Postgres under a date nothing asks about.
+    const stale = daysAgo(3);
+    const h = boot({ localStorageSeed: seedOn(stale, {
+      lab: [{ id: 1, name: 'R', role: 'w', wage: 500, present: true, doingOT: false, otHours: 0 }],
+      sessions: [{ supId: 1, supName: 'R', date: stale, teams: [] }],
+    }) });
+    const S = getState(h.ctx);
+
+    loginOn(h, '');
+
+    assert.equal(S.workDate, today(), 'still starts today');
+    assert.equal(S.unclosedDay, stale, 'and remembers what was left open');
+    const banner = h.document.getElementById('unclosed-banner');
+    assert.equal(banner.style.display, 'flex');
+    assert.match(h.document.getElementById('unclosed-banner-text').textContent,
+      /left open and never closed/i);
+  });
+
+  test('an EMPTY day left behind is not worth reporting', () => {
+    const h = boot({ localStorageSeed: seedOn(daysAgo(3)) });
+    const S = getState(h.ctx);
+
+    loginOn(h, '');
+
+    assert.equal(S.workDate, today());
+    assert.ok(!S.unclosedDay, 'no attendance, no production, nothing to chase');
+    assert.equal(h.document.getElementById('unclosed-banner').style.display, 'none');
+  });
+
+  test('a day that WAS closed is not reported as unclosed', () => {
+    const stale = daysAgo(3);
+    const h = boot({ localStorageSeed: seedOn(stale, {
+      ledger: [{ date: stale, sessions: [], rawLog: [], attendance: [] }],
+      lab: [{ id: 1, name: 'R', role: 'w', wage: 500, present: true, doingOT: false, otHours: 0 }],
+    }) });
+    const S = getState(h.ctx);
+
+    loginOn(h, '');
+    assert.ok(!S.unclosedDay, 'it is properly recorded — nothing to warn about');
+  });
+
+  test('the notice takes you to that day so it can be closed', () => {
+    const stale = daysAgo(3);
+    const h = boot({ localStorageSeed: seedOn(stale, {
+      lab: [{ id: 1, name: 'R', role: 'w', wage: 500, present: true, doingOT: false, otHours: 0 }],
+      sessions: [{ supId: 1, supName: 'R', date: stale, teams: [] }],
+    }) });
+    const S = getState(h.ctx);
+    loginOn(h, '');
+
+    call(h.ctx, 'openUnclosedDay()');
+
+    assert.equal(S.workDate, stale, 'the day is open again, ready to be closed');
+    assert.equal(h.document.getElementById('unclosed-banner').style.display, 'none',
+      'and the notice steps aside once you are on it');
+  });
+
+  test('the notice can be dismissed', () => {
+    const stale = daysAgo(3);
+    const h = boot({ localStorageSeed: seedOn(stale, {
+      lab: [{ id: 1, name: 'R', role: 'w', wage: 500, present: true, doingOT: false, otHours: 0 }],
+      sessions: [{ supId: 1, supName: 'R', date: stale, teams: [] }],
+    }) });
+    const S = getState(h.ctx);
+    loginOn(h, '');
+
+    call(h.ctx, 'dismissUnclosedDay()');
+
+    assert.ok(!S.unclosedDay);
+    assert.equal(h.document.getElementById('unclosed-banner').style.display, 'none');
+  });
+});

@@ -16,7 +16,7 @@
 
 import { updateSidebarForRole } from '../components/sidebar.js';
 import { ROLE_HOME } from './config.js';
-import { checkDayRollover, openWorkDate } from './day-rollover.js';
+import { checkDayRollover, nextOpenDate, noteUnclosedDay, openWorkDate } from './day-rollover.js';
 import { todayStr } from './format.js';
 import { go } from './router.js';
 import { currentRole, fbEnabled, setRole } from './session.js';
@@ -142,6 +142,28 @@ export function onLoginSuccess(displayName){
   if(pastDate){
     openWorkDate(pastDate, {reopen:true, pull:false});
   }else{
+    // ── NO DATE CHOSEN MEANS TODAY ──
+    //
+    // It used to mean "whatever day this device happened to be left on".
+    // S.workDate is restored from localStorage, and loadState() deliberately
+    // keeps an unclosed past day open, so signing in with an empty field could
+    // land on a day from last week — and a shift then got recorded against it
+    // without anyone choosing that.
+    //
+    // checkDayRollover() alone did not fix this: it returns early for an
+    // unsaved past day, which is exactly the case that strands you.
+    //
+    // nextOpenDate() rather than today flat, so a today that is already closed
+    // moves on instead of reopening history — the same rule the rollover uses.
+    //
+    // The day being left behind is NOT abandoned. Every operational table is
+    // keyed by work_date, so an unclosed day's rows stay in Postgres and
+    // opening it again brings them back. What must not happen is that going
+    // unmentioned, which is how a day previously vanished from the app: absent
+    // from Monthly, with its rows stranded where no query asks for them.
+    // noteUnclosedDay() records it and the banner offers to go and finish it.
+    noteUnclosedDay(S.workDate);
+    openWorkDate(nextOpenDate(todayStr()), {pull:false});
     checkDayRollover();
   }
   // Attach realtime subscriptions now that the role is known — init runs
