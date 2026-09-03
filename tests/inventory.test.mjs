@@ -226,6 +226,9 @@ describe('fg_stock rows reach getFGBalance with the right orientation', () => {
                        delete() { return this; }, update() { return this; },
                        not: () => Promise.resolve({ data: [], error: null }),
                        upsert: (rs) => { rows.push(...rs); return Promise.resolve({ data: rs, error: null }); } }),
+        // saveOpeningStock() writes through the atomic RPC.
+        rpc: (fn, params) => { rows.push(...((params && params.rows_in) || []));
+                               return Promise.resolve({ data: rows.length, error: null }); },
         auth: { getSession: () => Promise.resolve({ data: { session: null } }), signOut: () => Promise.resolve({}) },
         channel: () => { const ch = { on: () => ch, subscribe: () => ch }; return ch; },
         removeChannel: () => {},
