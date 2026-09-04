@@ -49,6 +49,9 @@
   // to hold over good rows on the server. That is one of the ways a whole
   // day's attendance turned into 161 `present: false` rows.
   var lastPullOk = false;
+  // WHICH day that successful pull covered. `lastPullOk` alone is not enough:
+  // it says a pull worked, not what it worked on. See removeMissing().
+  var lastPullDate = null;
 
   // ── SYNC INDICATOR ──────────────────────────────────────────────
   function dot(status) {
@@ -186,7 +189,7 @@
   async function removeMissing(table, column, keep, scope) {
     if (!ready || !navigator.onLine) return false;
 
-    // ONLY reconcile against a pull we know succeeded.
+    // ONLY reconcile against a pull we know succeeded, FOR THIS DAY.
     //
     // "Delete every row that is not in my local list" is safe only when the
     // local list is known to mirror the server. If the last pull failed — or
@@ -195,6 +198,30 @@
     // on a date rollover, for one), and an empty `keep` leaves the scope
     // filters as the entire predicate: it would delete the whole day.
     if (!lastPullOk) return false;
+
+    // ── AND THE PULL MUST HAVE BEEN OF THE DAY BEING RECONCILED ──
+    //
+    // `lastPullOk` is one flag for the whole client; it records that a pull
+    // worked, not which date it worked on. adoptWorkDate() — the midnight
+    // rollover — moves S.workDate to the new day and clears the day's slots
+    // WITHOUT pulling, so the flag stays true while the local list is empty
+    // for a date this device has never read.
+    //
+    // The next push then reconciled that empty list against the new day. For a
+    // supervisor the scope is narrowed to created_by, so they could only erase
+    // their own row; for an OWNER the scope is the work_date alone. An owner's
+    // laptop left open overnight would therefore delete every supervisor's
+    // production session for the new day, at the first thing anyone touched.
+    //
+    // Comparing dates closes it: after a rollover the day has not been pulled,
+    // so nothing is reconciled until it has been.
+    if (scope && scope.work_date && scope.work_date !== lastPullDate) {
+      console.warn('[FactoryDB] not reconciling deletes on ' + table + ' for ' +
+                   scope.work_date + ' — the last successful pull was for ' +
+                   (lastPullDate || 'no day') + '. A push must not delete rows ' +
+                   'for a day this device has not read.');
+      return false;
+    }
     try {
       var q = sb.from(table).delete();
       if (scope) Object.keys(scope).forEach(function (k) { q = q.eq(k, scope[k]); });
@@ -371,6 +398,7 @@
   async function pull(S) {
     if (!ready) return S;
     lastPullOk = false;
+    lastPullDate = null;
     var workDate = S.workDate || new Date().toISOString().slice(0, 10);
 
     try {
@@ -550,6 +578,7 @@
         dot('err');
       } else {
         lastPullOk = true;
+        lastPullDate = workDate;
         dot(outbox().length ? 'err' : 'ok');
       }
     } catch (e) {
@@ -978,6 +1007,7 @@
     flushOutbox: flushOutbox,
     pendingWrites: function () { return outbox().length; },
     lastPullOk: function () { return lastPullOk; },
+    lastPullDate: function () { return lastPullDate; },
     checkClock: checkClock,
     clockSkew: function () { return clockSkew; },
     lastWriteError: function () { return lastWriteError; },
