@@ -17,11 +17,13 @@
 // ==================================================================
 
 import { closedDaysExcludingOpen, getRMBalance } from '../core/calc.js';
+import { renderRMOpeningNotice } from './rmopening.js';
 import { todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
 
 export function renderStock(){
+  try{ renderRMOpeningNotice(); }catch(e){}
   if(!S.purchases) S.purchases=[];
   // Sync stock items with RM catalogue
   S.rm.forEach(r=>{
