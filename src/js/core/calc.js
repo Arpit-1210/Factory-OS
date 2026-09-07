@@ -184,7 +184,21 @@ export function getFGBalance(productName, stage, asOf){
 export function getRMBalance(matName, asOf){
   const cutoff = asOf || asOfDate();
   const s = (S.stock||[]).find(st=>st.name===matName);
-  const opening = s ? (s.opening||0) : 0;
+
+  // ── THE OPENING DECLARATION ──
+  // From rm_stock_opening, dated, and in scope only from the go-live date
+  // onwards — before that this system's records simply do not reach back.
+  //
+  // `S.stock[].opening` is the old home of this number, inside the rm_stock
+  // document. It is still read as a fallback so a device that has not yet
+  // pulled the new table, or an install predating it, does not suddenly report
+  // every material short by its opening quantity. Migration 0010 copies those
+  // values across, after which the declaration is the answer.
+  const rmMeta = S.rmOpening || {};
+  const declared = (S.rmOpeningQty || {})[matName];
+  const openingQty = declared !== undefined ? declared : (s ? (s.opening||0) : 0);
+  const openingAsOf = rmMeta.asOfDate || (declared !== undefined ? null : (s && s.openingDate) || null);
+  const opening = (!openingAsOf || openingAsOf <= cutoff) ? openingQty : 0;
 
   // Receipt rows in scope. `type:'opening'` rows are skipped because the
   // opening balance is already carried by S.stock.opening above — counting
