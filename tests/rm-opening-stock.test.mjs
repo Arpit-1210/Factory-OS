@@ -350,3 +350,66 @@ describe('the standing notice on the Stock screen', () => {
     assert.equal(document.getElementById('rmo-notice').style.display, 'none');
   });
 });
+
+describe('the declaration is an OPTIONAL read', () => {
+  // rm_stock_opening arrives with migration 0010. Between deploying this code
+  // and applying that migration the table does not exist. That gap must be
+  // uneventful — not a pull that reports failure, because lastPullOk gates
+  // removeMissing() and a false there stops deletions propagating at all.
+  const bootWith = async (rmOpeningError) => {
+    const { bootDb } = await import('./harness.mjs');
+    const tables = { rm_stock_opening: [{ material: 'Resin', qty: 400,
+                                          as_of_date: '2026-08-01', locked: true }] };
+    const query = (table) => {
+      const q = {
+        _f: [], select: () => q, eq: () => q, order: () => q,
+        single: () => Promise.resolve({ data: null, error: { message: 'none' } }),
+        maybeSingle: () => Promise.resolve({ data: null, error: null }),
+        not: () => q, update: () => q, delete: () => q,
+        upsert: (r) => Promise.resolve({ data: r, error: null }),
+        then(res) {
+          if (table === 'rm_stock_opening' && rmOpeningError) {
+            return Promise.resolve({ data: null, error: rmOpeningError }).then(res);
+          }
+          return Promise.resolve({ data: tables[table] || [], error: null }).then(res);
+        },
+      };
+      return q;
+    };
+    const { win } = bootDb({ supabase: { createClient: () => ({
+      from: query,
+      rpc: () => Promise.resolve({ data: null, error: null }),
+      auth: { getSession: () => Promise.resolve({ data: { session: { user: { id: 'u1' } } } }),
+              signOut: () => Promise.resolve({ error: null }) },
+      channel: () => { const ch = { on: () => ch, subscribe: (cb) => { cb && cb('SUBSCRIBED'); return ch; } }; return ch; },
+      removeChannel: () => {},
+    }) } });
+    await win.FactoryDB.init();
+    return win.FactoryDB;
+  };
+
+  test('a pull still SUCCEEDS when the table does not exist yet', async () => {
+    const DB = await bootWith({ code: '42P01', message: 'relation "rm_stock_opening" does not exist' });
+    const S = { workDate: '2026-09-01', lab: [], sessions: [], rawLog: [],
+                fgTransfers: [], fgStock: {}, rm: [], fg: [], ledger: [], stock: [] };
+
+    await DB.pull(S);
+
+    assert.equal(DB.lastPullOk(), true,
+      'a missing optional table must not stop deletions reconciling for everyone');
+    assert.equal(DB.lastPullDate(), '2026-09-01');
+  });
+
+  test('and the declaration is read when the table IS there', async () => {
+    const DB = await bootWith(null);
+    const S = { workDate: '2026-09-01', lab: [], sessions: [], rawLog: [],
+                fgTransfers: [], fgStock: {}, rm: [], fg: [], ledger: [], stock: [] };
+
+    await DB.pull(S);
+
+    assert.equal(DB.lastPullOk(), true);
+    assert.equal(S.rmOpeningQty.Resin, 400);
+    assert.equal(S.rmOpening.asOfDate, '2026-08-01');
+    assert.equal(S.rmOpening.locked, true);
+  });
+});

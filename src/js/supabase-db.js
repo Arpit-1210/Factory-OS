@@ -35,7 +35,7 @@
   // be named in the log instead of vanishing into a `|| []`.
   var TABLES = ['workers', 'rm_catalogue', 'fg_catalogue', 'attendance',
                 'production_sessions', 'raw_log', 'fg_transfers', 'fg_stock',
-                'day_ledger', 'factory_doc'];
+                'day_ledger', 'factory_doc', 'rm_stock_opening'];
 
   // The worker ids the server actually has, as of the last successful pull.
   // null means "not known yet" — never "empty". push() uses it to avoid
@@ -451,6 +451,26 @@
       var failed = res.map(function (r, i) {
         if (!r.error) return null;
         if (TABLES[i] === 'factory_doc' && currentRole !== 'owner') return null;
+
+        // ── A MISSING OPENING TABLE MUST NOT FAIL THE PULL ──
+        //
+        // rm_stock_opening arrives with migration 0010. Between deploying this
+        // code and applying that migration the table does not exist, and
+        // letting its 42P01 into `failed` would leave lastPullOk false — which
+        // stops removeMissing() reconciling deletions at all (a session deleted
+        // on one device would come straight back) and pins the sync dot red for
+        // every user.
+        //
+        // The read is optional by construction: the balance falls back to the
+        // old S.stock[].opening when the declaration is absent. So it is warned
+        // about and stepped over, never counted as a failure.
+        if (TABLES[i] === 'rm_stock_opening') {
+          console.warn('[FactoryDB] rm_stock_opening unavailable (' + r.error.message +
+                       ') — falling back to the opening figures in rm_stock. ' +
+                       'Apply migration 0010 to use the declaration.');
+          return null;
+        }
+
         return TABLES[i] + ': ' + r.error.message;
       }).filter(Boolean);
 
