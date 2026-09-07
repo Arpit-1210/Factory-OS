@@ -346,6 +346,22 @@
   // carries the same as_of_date and locked flag, so the first row that has
   // them speaks for the set; `locked` is true only if EVERY row is locked, so
   // a half-written snapshot never reads as settled.
+  // Raw-material opening: the quantities, and the declaration's own state.
+  function rowsToRmOpening(rows) {
+    var qty = {}, list = rows || [];
+    list.forEach(function (r) { qty[r.material] = Number(r.qty) || 0; });
+    var dated = list.find(function (r) { return r.as_of_date; }) || {};
+    return {
+      qty: qty,
+      meta: {
+        asOfDate: dated.as_of_date ? String(dated.as_of_date).slice(0, 10) : null,
+        locked:   list.length > 0 && list.every(function (r) { return !!r.locked; }),
+        lockedBy: dated.locked_by || null,
+        lockedAt: dated.locked_at || null
+      }
+    };
+  }
+
   function rowsToFgOpening(rows) {
     var list = rows || [];
     if (!list.length) return { asOfDate: null, locked: false, lockedBy: null, lockedAt: null };
@@ -416,7 +432,10 @@
         sb.from('fg_transfers').select('*'),
         sb.from('fg_stock').select('*'),
         sb.from('day_ledger').select('*').order('work_date'),
-        sb.from('factory_doc').select('*')
+        sb.from('factory_doc').select('*'),
+        // Appended LAST on purpose: every res[N] below is positional, so a new
+        // read inserted mid-list would silently re-point all of them.
+        sb.from('rm_stock_opening').select('*')
       ]);
 
       // WHY THIS LOOP EXISTS
@@ -572,6 +591,14 @@
         var key = map[d.key];
         if (key && d.data !== undefined && d.data !== null) S[key] = d.data;
       });
+
+      // Raw-material opening stock. Its own table, like fg_stock, so the lock
+      // can be a trigger rather than a promise the client makes to itself.
+      if (res[10] && !res[10].error) {
+        var rmo = rowsToRmOpening(res[10].data);
+        S.rmOpeningQty = rmo.qty;
+        S.rmOpening    = rmo.meta;
+      }
 
       if (failed.length) {
         console.error('[FactoryDB] pull errors:', failed);
@@ -921,6 +948,46 @@
     }
   }
 
+  /** The raw-material declaration. One transaction, owner only. */
+  async function saveRMOpeningStock(qtyByMaterial, asOfDate, lock) {
+    if (!ready) return false;
+    var rows = Object.keys(qtyByMaterial || {})
+      .map(function (m) { return { material: m, qty: Number(qtyByMaterial[m]) || 0 }; })
+      .filter(function (r) { return r.qty > 0; });
+    try {
+      var res = await sb.rpc('save_rm_opening_stock', {
+        rows_in: rows, as_of: asOfDate || null, lock_it: !!lock
+      });
+      if (res.error) {
+        lastWriteError = { table: 'rm_stock_opening', code: res.error.code,
+                           message: res.error.message,
+                           hint: 'opening stock was not saved', at: Date.now() };
+        console.error('[FactoryDB] rm opening stock:', res.error.message);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.error('[FactoryDB] rm opening stock:', e);
+      return false;
+    }
+  }
+
+  async function setRMOpeningLock(locked) {
+    if (!ready) return false;
+    try {
+      var res = await sb.from('rm_stock_opening')
+        .update({ locked: !!locked }).not('material', 'is', null);
+      if (res.error) {
+        console.error('[FactoryDB] rm opening lock:', res.error.message);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.error('[FactoryDB] rm opening lock:', e);
+      return false;
+    }
+  }
+
   /** Unlock the snapshot for editing. Owner only; the trigger enforces it. */
   async function setOpeningLock(locked) {
     if (!ready) return false;
@@ -1001,6 +1068,8 @@
     push: push,
     saveDay: saveDay,
     saveOpeningStock: saveOpeningStock,
+    saveRMOpeningStock: saveRMOpeningStock,
+    setRMOpeningLock: setRMOpeningLock,
     setOpeningLock: setOpeningLock,
     startSync: startSync,
     stopSync: stopSync,

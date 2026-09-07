@@ -38,6 +38,9 @@ export function defaultState() {
     // date. `asOfDate` is what stops that quantity counting on days before it
     // was true; `locked` is the owner having confirmed the figures.
     fgOpening: { asOfDate: null, locked: false, lockedBy: null, lockedAt: null },
+    // The same declaration for raw materials: {material: qty} plus its state.
+    rmOpeningQty: {},
+    rmOpening: { asOfDate: null, locked: false, lockedBy: null, lockedAt: null },
     dispatches: [], salaryAdj: {}, bom: {}, unitTransfers: [],
   };
 }
