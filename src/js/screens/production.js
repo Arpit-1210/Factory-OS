@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { calcOT, getFGBalance, sessionMembers, sessionProduction, sessionTeams } from '../core/calc.js';
+import { baseProductName, calcOT, fgVariantBreakdown, getFGBalance, sessionMembers, sessionProduction, sessionTeams } from '../core/calc.js';
 import { SPC, STAGES } from '../core/config.js';
 import { fmt, fmtN, spBadge, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
@@ -26,6 +26,64 @@ import { persist } from '../core/sync.js';
 // ── screen state ──
 let activeSupId = null;
 let activeTeamId = null;
+
+// Where a stage takes its goods from. Logging at a stage moves them on from
+// the one before it.
+const PREV_STAGE = {Finishing:'Moulding', Painting:'Finishing', Packing:'Painting'};
+
+/**
+ * The product list for a stage.
+ *
+ * Painted stock is held under its colour — "Chair A — Red" — so a stage fed by
+ * Painting has to be able to name one. Without this the only choices at Packing
+ * were plain catalogue products, and packing a red chair filed it as an
+ * uncoloured Chair A: the colour was lost at exactly the point someone needs to
+ * know which one is going out of the door.
+ *
+ * Colours already waiting in the previous stage come first, since they are what
+ * this stage is there to work on. A variant option carries the NAME as its
+ * value; a catalogue option carries the numeric id, as it always did.
+ */
+function productOptions(stage, q){
+  const match = name => !q || name.toLowerCase().includes(q);
+  const prev = PREV_STAGE[stage];
+
+  let variants = '';
+  if(prev){
+    const waiting = [];
+    S.fg.forEach(f => fgVariantBreakdown(f.name, prev).variants.forEach(v => {
+      if(match(v.name)) waiting.push({name:v.name, price:f.price, qty:v.qty});
+    }));
+    if(waiting.length){
+      variants = `<optgroup label="In ${prev} now">` +
+        waiting.map(v=>`<option value="${v.name}" data-price="${v.price}">${v.name} — ${fmt(v.price)} · ${v.qty} waiting</option>`).join('') +
+        '</optgroup>';
+    }
+  }
+
+  const catalogue = S.fg.filter(f=>match(f.name))
+    .map(f=>`<option value="${f.id}" data-price="${f.price}">[#${f.id}] ${f.name} — ${fmt(f.price)}</option>`).join('');
+
+  return '<option value="">— select product —</option>' + variants +
+         (variants ? '<optgroup label="Catalogue">'+catalogue+'</optgroup>' : catalogue);
+}
+
+/**
+ * The catalogue product and the exact name the supervisor picked.
+ *
+ * The dropdown holds two kinds of value: a numeric catalogue id, and the full
+ * name of a colour already in the previous stage.
+ */
+function chosenProduct(value){
+  const raw = String(value||'');
+  if(!raw) return {fg:null, name:''};
+  if(/^\d+$/.test(raw)){
+    const fg = S.fg.find(f=>f.id===parseInt(raw));
+    return {fg:fg||null, name:fg?fg.name:''};
+  }
+  const base = baseProductName(raw);
+  return {fg:S.fg.find(f=>f.name===base)||null, name:raw};
+}
 
 export function renderSupLogin(){
   // Show pending/in-production orders as task list for supervisors
@@ -267,8 +325,7 @@ export function renderSupTeamWork(sess, team){
   const sel=document.getElementById('sw-prod');
   const cur=sel.value;
   const q=document.getElementById('fg-search')?.value?.toLowerCase()||'';
-  sel.innerHTML='<option value="">— select product —</option>'+
-    S.fg.map(f=>`<option value="${f.id}" data-price="${f.price}">[#${f.id}] ${f.name} — ${fmt(f.price)}</option>`).join('');
+  sel.innerHTML=productOptions(team.stage, q);
   if(cur) sel.value=cur;
 
   // Add live search for product dropdown
@@ -280,10 +337,10 @@ export function renderSupTeamWork(sess, team){
     searchInput.placeholder='🔍 Search products...';
     searchInput.style.cssText='width:100%;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;color:#111827;padding:7px 10px;font-family:var(--body);font-size:12px;margin-bottom:8px;outline:none';
     searchInput.oninput=function(){
-      const q=this.value.toLowerCase();
-      const sel=document.getElementById('sw-prod');
-      sel.innerHTML='<option value="">— select product —</option>'+
-        S.fg.filter(f=>!q||f.name.toLowerCase().includes(q)).map(f=>`<option value="${f.id}" data-price="${f.price}">[#${f.id}] ${f.name} — ${fmt(f.price)}</option>`).join('');
+      const sess2=S.sessions.find(ss=>ss.supId===activeSupId);
+      const t2=sess2&&sess2.teams?sess2.teams.find(t3=>t3.teamId===activeTeamId):null;
+      document.getElementById('sw-prod').innerHTML=
+        productOptions(t2?t2.stage:'Moulding', this.value.toLowerCase());
     };
     sel.parentNode.insertBefore(searchInput, sel);
   }
@@ -340,7 +397,9 @@ export function logProd(){
     sess.teams.push(team);activeTeamId=team.teamId;
   }
   const sel=document.getElementById('sw-prod');
-  const fg=S.fg.find(f=>f.id===parseInt(sel.value));
+  // Either a catalogue id or the full name of a colour waiting in the previous
+  // stage — chosenProduct() resolves both to the catalogue product behind it.
+  const {fg, name:pickedName}=chosenProduct(sel.value);
   const qty=parseFloat(document.getElementById('sw-qty').value)||0;
   const uv=parseFloat(document.getElementById('sw-price').value)||0;
   const wt=parseFloat(document.getElementById('sw-weight')?.value)||0;
@@ -369,17 +428,20 @@ export function logProd(){
     }
   }
 
-  // Product name: "Garden Pot L — Orange" for Painting, normal for others
-  const prodName = (currentStage==='Painting' && colour) ? fg.name+' — '+colour : fg.name;
+  // What this stage produces. Painting names the colour it just applied — from
+  // the CATALOGUE name, so repainting cannot stack "Chair A — Red — Blue".
+  // Every other stage keeps the name it took off the shelf, which is how a
+  // colour survives Packing and reaches the order it is dispatched against.
+  const prodName = (currentStage==='Painting' && colour) ? fg.name+' — '+colour : pickedName;
 
-  // Auto-transfer from previous stage
-  const PREV_STAGE = {Finishing:'Moulding',Painting:'Finishing',Packing:'Painting'};
   const prevStage = PREV_STAGE[currentStage];
 
   if(prevStage){
     if(!S.fgTransfers) S.fgTransfers=[];
-    // For Painting, check against the base product name (without colour) in Finishing
-    const checkName = currentStage==='Painting' ? fg.name : prodName;
+    // What is consumed from the previous stage: the item as it was picked.
+    // Painting takes plain stock and gives it a colour, so it consumes the
+    // catalogue product rather than the name it is about to create.
+    const checkName = currentStage==='Painting' ? baseProductName(pickedName) : pickedName;
     const available = getFGBalance(checkName, prevStage);
     if(available < qty){
       const proceed = confirm('Only '+available+' in '+prevStage+'. Produce '+qty+' in '+currentStage+'?');
