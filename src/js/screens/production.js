@@ -219,6 +219,17 @@ export function renderSupTeamWork(sess, team){
     cfld.style.display=(team.stage==='Painting')?'block':'none';
     if(team.stage!=='Painting'){const cv=document.getElementById('sw-color-val');if(cv)cv.value='';}
   }
+  // Paint changes the colour, not the price. At Painting the rate is held at
+  // the catalogue price so a colour cannot quietly become a differently priced
+  // product — every "Chair A — Red" is worth exactly what a Chair A is worth,
+  // which is what the stock screen values it at.
+  const pfld=document.getElementById('sw-price');
+  if(pfld){
+    const painting=team.stage==='Painting';
+    pfld.readOnly=painting;
+    pfld.style.background=painting?'#F3F4F6':'';
+    pfld.title=painting?'Catalogue price — paint does not change what the product sells for':'';
+  }
 
   // Labour cost
   const lc=team.team.reduce((a,m)=>a+m.wage,0)+(team.team.reduce((a,m)=>a+calcOT(m),0));
@@ -337,10 +348,25 @@ export function logProd(){
 
   const currentStage = team.stage||'Moulding';
 
-  // Colour — optional text field shown only for Painting stage
+  // The rate the goods are booked at. The ₹/unit box is held read-only during
+  // Painting, but a product picked before the stage was switched can leave a
+  // stale figure in it, so the catalogue price wins outright here.
+  const unitVal = (currentStage==='Painting' && fg.price) ? fg.price : uv;
+
+  // Colour — required at Painting, and nowhere else.
+  //
+  // A painted item IS its colour: the stock screen lists "Chair A — Red" as its
+  // own line, and packing and dispatch draw from it. Letting the field through
+  // empty filed painted goods back under the plain product, where nobody could
+  // tell one colour from another afterwards.
   let colour = '';
   if(currentStage==='Painting'){
     colour = (document.getElementById('sw-color-val')?.value||'').trim();
+    if(!colour){
+      alert('Which colour was it painted in?\n\nPainted stock is tracked per colour, so this cannot be left blank.');
+      document.getElementById('sw-color-val')?.focus();
+      return;
+    }
   }
 
   // Product name: "Garden Pot L — Orange" for Painting, normal for others
@@ -379,7 +405,7 @@ export function logProd(){
 
   team.production.push({
     name:prodName, baseName:fg.name, colour:colour,
-    qty,unitVal:uv,value:qty*uv,weightPerPc:wt,totalWeight:wt*qty
+    qty,unitVal:unitVal,value:qty*unitVal,weightPerPc:wt,totalWeight:wt*qty
   });
 
   // If Packing stage — offer to assign to order
