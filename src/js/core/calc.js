@@ -227,14 +227,21 @@ export function getFGBalance(productName, stage, asOf){
   //    which is why it is still counted in full under transferredOut below.
   //    A hand-made transfer (Quick Transfer, the transfer form, a dispatch) has
   //    no production row behind it and is credited normally.
+  //    Movements roll up the same way production does: a query for "Chair A"
+  //    answers for its colours too, so a move recorded against "Chair A — Red"
+  //    counts against Chair A. Without that the base balance kept goods it had
+  //    already sent on, because packing a colour names the colour. It does not
+  //    work the other way — a move named for the plain product is not deducted
+  //    from a particular colour, which is what fgVariantBreakdown() settles.
+  const rollsUp = n => n===productName || baseProductName(n)===productName;
+
   const REAL_STAGES = ['Moulding','Finishing','Painting','Packing'];
   const transferredIn = (S.fgTransfers||[]).filter(t=>{
     if(t.to!==stage) return false;
     if(t.auto) return false;
     if(!REAL_STAGES.includes(t.from)) return false; // skip Unit2, external etc
     if(!upTo(t.date, cutoff)) return false;
-    const inName = t.productIn||t.product;
-    return inName===productName||t.product===productName;
+    return rollsUp(t.productIn||t.product) || rollsUp(t.product);
   }).reduce((a,t)=>a+t.qty,0);
 
   // 4. Transferred OUT from this stage (to another stage, Order, Dispatch, Unit2)
@@ -244,8 +251,7 @@ export function getFGBalance(productName, stage, asOf){
   const transferredOut = (S.fgTransfers||[]).filter(t=>{
     if(t.from!==stage) return false;
     if(!upTo(t.date, cutoff)) return false;
-    const outName = t.productOut||t.product;
-    return outName===productName||t.product===productName;
+    return rollsUp(t.productOut||t.product) || rollsUp(t.product);
   }).reduce((a,t)=>a+t.qty,0);
 
   // 5. Manual adjustments
