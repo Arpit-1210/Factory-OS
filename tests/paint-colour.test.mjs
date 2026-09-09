@@ -217,6 +217,54 @@ describe('painted stock moves on', () => {
   });
 });
 
+describe('the colour survives packing', () => {
+  test('offers the colours waiting in the stage before this one', () => {
+    team('Painting');
+    log({ colour: 'Red', qty: 6 });
+
+    newTeamAt('Packing');
+    const opts = document.getElementById('sw-prod').innerHTML;
+    assert.match(opts, /In Painting now/, 'grouped as what is waiting to be worked on');
+    assert.match(opts, /value="Chair A — Red"[^>]*>Chair A — Red — ₹\s*900 · 6 waiting/);
+  });
+
+  test('packs the colour rather than losing it', () => {
+    const S = team('Painting');
+    log({ colour: 'Red' });
+
+    newTeamAt('Packing');
+    log({ product: 'Chair A — Red' });          // picked from the group above
+
+    assert.equal(rows(S)[0].name, 'Chair A — Red', 'packed as the colour it is');
+    assert.equal(rows(S)[0].baseName, 'Chair A');
+    const { variants } = breakdown('Chair A', 'Packing');
+    assert.deepEqual(variants.map(v => [v.name, v.qty]), [['Chair A — Red', 10]]);
+    assert.equal(breakdown('Chair A', 'Painting').variants.length, 0, 'and it left Painting');
+    assert.equal(unitsOnHand(), 10);
+  });
+
+  test('an order for the catalogue product is still fillable by a painted one', () => {
+    team('Painting');
+    log({ colour: 'Red' });
+    newTeamAt('Packing');
+    log({ product: 'Chair A — Red' });
+
+    // The exact check updateOrderStatus() runs before it lets a dispatch through:
+    // the order says "Chair A", and ten red ones must answer for it.
+    assert.equal(bal('Chair A', 'Packing'), 10);
+  });
+
+  test('repainting does not stack colours on the name', () => {
+    const S = team('Painting');
+    log({ colour: 'Red' });
+
+    newTeamAt('Painting');
+    log({ product: 'Chair A — Red', colour: 'Blue' });
+
+    assert.equal(rows(S)[0].name, 'Chair A — Blue', 'not "Chair A — Red — Blue"');
+  });
+});
+
 describe('the pipeline conserves stock', () => {
   test('ten moulded, finished, painted and packed stay ten throughout', () => {
     team('Moulding');
