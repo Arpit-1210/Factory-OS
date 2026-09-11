@@ -101,6 +101,18 @@ export function baseProductName(name){
 }
 
 /**
+ * The stage a production row belongs to.
+ *
+ * Rows are stamped with their stage when they are logged. Older rows, written
+ * before that, have only the team's stage to go on — which is what every
+ * reader used to use, and why moving a team's stage tab silently moved
+ * everything it had already logged to the new stage along with it.
+ */
+export function prodStage(p, team){
+  return (p && p.stage) || (team && team.stage) || 'Moulding';
+}
+
+/**
  * What a stage holds, split by paint colour.
  *
  * Painting logs "Chair A — Red"; everything downstream — the transfer records,
@@ -130,8 +142,9 @@ export function fgVariantBreakdown(base, stage, asOf){
   // Painted rows at this stage, oldest first.
   const made = [];
   const collect = sessions => (sessions||[]).forEach(ss =>
-    (ss.teams||[]).filter(t=>t.stage===stage).forEach(t =>
+    (ss.teams||[]).forEach(t =>
       (t.production||[]).forEach(p => {
+        if(prodStage(p,t)!==stage) return;
         const name = p.name;
         if(!name || name===base) return;              // not a colour variant
         if(baseProductName(name)!==base) return;      // a different product
@@ -192,19 +205,25 @@ export function getFGBalance(productName, stage, asOf){
   // 2. Production logged directly at this stage (open day + history).
   //    The open day's sessions belong to S.workDate, so they count only when
   //    that day is itself within the cut-off.
+  //    Each row is counted at the stage it was LOGGED at — prodStage() — not
+  //    at whatever stage its team happens to be on now. A team's stage is a
+  //    property of the team, so switching the tab used to drag everything the
+  //    team had already logged along with it and restate stock for a day that
+  //    was finished hours ago.
+  const mine = p => (p.baseName||p.name)===productName||p.name===productName;
   const producedToday = upTo(S.workDate, cutoff) ? S.sessions.reduce((a,ss)=>
-    a+(ss.teams||[]).filter(t=>t.stage===stage)
-      .reduce((b,t)=>b+t.production
-        .filter(p=>(p.baseName||p.name)===productName||p.name===productName)
+    a+(ss.teams||[])
+      .reduce((b,t)=>b+(t.production||[])
+        .filter(p=>prodStage(p,t)===stage&&mine(p))
         .reduce((c,p)=>c+p.qty,0),0)
   ,0) : 0;
   const producedHistory = closedDaysExcludingOpen()
     .filter(day=>upTo(day.date, cutoff))
     .reduce((a,day)=>
       a+(day.sessions||[]).reduce((b,ss)=>
-        b+(ss.teams||[]).filter(t=>t.stage===stage)
+        b+(ss.teams||[])
           .reduce((c,t)=>c+(t.production||[])
-            .filter(p=>(p.baseName||p.name)===productName||p.name===productName)
+            .filter(p=>prodStage(p,t)===stage&&mine(p))
             .reduce((d,p)=>d+p.qty,0),0)
       ,0)
     ,0);

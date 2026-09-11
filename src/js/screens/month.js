@@ -16,6 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
+import { prodStage } from '../core/calc.js';
 import { MNAMES, STAGES } from '../core/config.js';
 import { fmt, fmtN, spBadge } from '../core/format.js';
 import { S } from '../core/state.js';
@@ -135,8 +136,10 @@ export function renderMonthly(){
     // Goods ARE per team, so they accumulate inside the team walk.
     (e.sessions||[]).forEach(ss=>{
       (ss.teams||[]).forEach(t=>{
-        if(!stT[t.stage]) return;
-        stT[t.stage].g+=(t.production||[]).reduce((a,p)=>a+num(p.value),0);
+        (t.production||[]).forEach(p=>{
+          const st=prodStage(p,t);
+          if(stT[st]) stT[st].g+=num(p.value);
+        });
       });
     });
     // Labour, OT and RM are NOT. buildPayload() writes stageLab/stageOT/stageRM

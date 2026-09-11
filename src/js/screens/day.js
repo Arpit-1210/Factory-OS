@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { calcOT } from '../core/calc.js';
+import { calcOT, prodStage } from '../core/calc.js';
 import { STAGES } from '../core/config.js';
 import { fmt, fmtN } from '../core/format.js';
 import { go } from '../core/router.js';
@@ -39,12 +39,13 @@ export function renderDay(){
   let invHTML='';
   STAGES.forEach((stage,si)=>{
     const pm={};
-    S.sessions.forEach(ss=>(ss.teams||[]).filter(t=>t.stage===stage).forEach(t=>t.production.forEach(p=>{
+    S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>{
+      if(prodStage(p,t)!==stage)return;
       if(!pm[p.name])pm[p.name]={...p,qty:0,value:0};pm[p.name].qty+=p.qty;pm[p.name].value+=p.value;
     })));
     if(!Object.keys(pm).length)return;
     const ns=STAGES[si+1];const mn={};
-    if(ns)S.sessions.forEach(ss=>(ss.teams||[]).filter(t=>t.stage===ns).forEach(t=>t.production.forEach(p=>mn[p.name]=(mn[p.name]||0)+p.qty)));
+    if(ns)S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>{if(prodStage(p,t)===ns)mn[p.name]=(mn[p.name]||0)+p.qty;})));
     invHTML+=`<div style="margin-bottom:16px"><div style="margin-bottom:8px"><span class="sp sp${si}">${stage}</span></div><table class="tbl"><thead><tr><th>Product</th><th class="num">Produced</th><th class="num">Moved to ${ns||'Customer'}</th><th class="num">Remaining</th><th class="num">₹/unit</th><th class="num">Stock Value</th></tr></thead><tbody>${Object.values(pm).map(p=>{const mv=mn[p.name]||0;const rem=p.qty-mv;return`<tr><td style="font-weight:500">${p.name}</td><td class="num">${p.qty}</td><td class="num" style="color:${mv?'var(--amber)':'var(--text4)'}">${mv?'→'+mv:'—'}</td><td class="num">${rem}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(rem*p.unitVal)}</td></tr>`;}).join('')}</tbody></table></div>`;
   });
   document.getElementById('day-inv').innerHTML=invHTML||'<div style="color:var(--text4);font-size:12px">No production logged today.</div>';
@@ -92,7 +93,7 @@ export function buildPayload(){
     });
   });
   const productLog=[];
-  S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>productLog.push({...p,stage:t.stage,supName:ss.supName,teamId:t.teamId}))));
+  S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>productLog.push({...p,stage:prodStage(p,t),supName:ss.supName,teamId:t.teamId}))));
   const attendance=S.lab.map(l=>({id:l.id,name:l.name,role:l.role,wage:l.wage,present:l.present,doingOT:l.doingOT,otHours:l.otHours||0,ot:l.otHours||0}));
   return{
     date:S.workDate,

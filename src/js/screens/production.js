@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { baseProductName, calcOT, fgVariantBreakdown, getFGBalance, sessionMembers, sessionProduction, sessionTeams } from '../core/calc.js';
+import { baseProductName, calcOT, fgVariantBreakdown, getFGBalance, prodStage, sessionMembers, sessionProduction, sessionTeams } from '../core/calc.js';
 import { SPC, STAGES } from '../core/config.js';
 import { fmt, fmtN, spBadge, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
@@ -352,7 +352,9 @@ export function renderSupTeamWork(sess, team){
   const lc2=team.team.reduce((a,m)=>a+m.wage,0)+team.team.reduce((a,m)=>a+calcOT(m),0);
   pt.innerHTML=`<table class="tbl"><thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Wt/pc</th><th class="num">Total Wt</th><th class="num">₹/kg</th><th class="num">₹/unit</th><th class="num">Total</th><th></th></tr></thead>
   <tbody>${team.production.map((p,i)=>{const wt=p.weightPerPc||0;const tw=p.totalWeight||0;const rpkg=wt>0?Math.round(p.unitVal/wt):0;
-    return`<tr><td style="font-weight:500;color:#111827">${p.name}</td><td class="num">${p.qty}</td><td class="num">${wt||'—'}</td><td class="num">${tw?fmtN(tw)+' kg':'—'}</td><td class="num" style="color:#B45309">${rpkg?fmt(rpkg):'—'}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(p.value)}</td><td><button class="btn btn-ember btn-xs" data-click="delProd" data-args="[${i}]">✕</button></td></tr>`;}).join('')}
+    const rowStage=prodStage(p,team);
+    const elsewhere=rowStage!==team.stage?` <span class="sp ${SPC[STAGES.indexOf(rowStage)]}" style="font-size:9px">${rowStage}</span>`:'';
+    return`<tr><td style="font-weight:500;color:#111827">${p.name}${elsewhere}</td><td class="num">${p.qty}</td><td class="num">${wt||'—'}</td><td class="num">${tw?fmtN(tw)+' kg':'—'}</td><td class="num" style="color:#B45309">${rpkg?fmt(rpkg):'—'}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(p.value)}</td><td><button class="btn btn-ember btn-xs" data-click="delProd" data-args="[${i}]">✕</button></td></tr>`;}).join('')}
   </tbody></table>
   <div style="display:flex;justify-content:flex-end;gap:16px;font-family:var(--mono);font-size:11px;margin-top:9px;padding-top:9px;border-top:1px solid #F3F4F6">
     <span>Goods: <span style="color:#065F46">${fmt(tv)}</span></span>
@@ -364,7 +366,27 @@ export function swStage(s){
   const sess=S.sessions.find(ss=>ss.supId===activeSupId);
   if(sess&&activeTeamId!==null){
     const team=sess.teams.find(t=>t.teamId===activeTeamId);
-    if(team){team.stage=s;persist();}
+    if(team&&team.stage!==s){
+      // Moving the tab used to move everything the team had already logged
+      // with it, silently: log ten at Painting, switch to Packing to log the
+      // packing, and the ten painted ones were restated as packed. Stock for a
+      // day that was finished hours ago changed under the user's feet.
+      //
+      // Both readings are legitimate — a mis-set tab needs correcting, and a
+      // team moving on to the next stage must not drag its history — so the
+      // one the user meant is the one to ask for. Rows keep the stage they
+      // were logged at unless the answer is yes.
+      const logged=(team.production||[]).filter(p=>(p.stage||team.stage)===team.stage);
+      if(logged.length&&!confirm(
+        logged.length+' item'+(logged.length===1?'':'s')+' already logged under '+team.stage+'.\n\n'+
+        'OK — the tab was wrong: move them to '+s+' as well.\n'+
+        'Cancel — the team is moving on: leave them in '+team.stage+'.')){
+        (team.production||[]).forEach(p=>{ if(!p.stage) p.stage=team.stage; });
+      } else {
+        logged.forEach(p=>{ p.stage=s; });
+      }
+      team.stage=s;persist();
+    } else if(team){team.stage=s;persist();}
   }
   renderSupWork();
 }
@@ -466,7 +488,7 @@ export function logProd(){
   }
 
   team.production.push({
-    name:prodName, baseName:fg.name, colour:colour,
+    name:prodName, baseName:fg.name, colour:colour, stage:currentStage,
     qty,unitVal:unitVal,value:qty*unitVal,weightPerPc:wt,totalWeight:wt*qty
   });
 
