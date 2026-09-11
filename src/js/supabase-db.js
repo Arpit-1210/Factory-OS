@@ -84,6 +84,13 @@
 
       console.warn('[FactoryDB] data cleared on the server — dropping this ' +
                    'device\'s cache and reloading');
+      // The marker, BEFORE the deletes, and it is the part that matters.
+      // location.reload() does not stop this script: pullFromFirebase() writes
+      // S back to the state key on its very next line, which would re-create
+      // the cache these deletes just removed — and with the new epoch already
+      // recorded, the device would never reset again. loadState() honours the
+      // marker on the next boot regardless of what got written in between.
+      try { ls.setItem('_reset_pending', '1'); } catch (e) {}
       CACHE_KEYS.forEach(function (k) { try { ls.removeItem(k); } catch (e) {} });
       if (global.location && typeof global.location.reload === 'function') {
         global.location.reload();
