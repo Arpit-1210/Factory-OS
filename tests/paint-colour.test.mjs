@@ -265,6 +265,73 @@ describe('the colour survives packing', () => {
   });
 });
 
+describe('a production row stays at the stage it was logged at', () => {
+  test('moving the tab on does not drag what is already logged with it', () => {
+    const S = team('Painting');
+    log({ colour: 'Red' });
+
+    // Same team, tab moved on — answering "no, the team is moving on".
+    call(ctx, 'window.confirm = () => false');
+    call(ctx, 'swStage("Packing")');
+
+    assert.equal(rows(S)[0].stage, 'Painting', 'the row keeps its own stage');
+    assert.equal(breakdown('Chair A', 'Painting').variants[0].qty, 10,
+      'still painted, still in Painting');
+    assert.equal(bal('Chair A', 'Packing'), 0, 'and nothing was restated as packed');
+    call(ctx, 'window.confirm = () => true');
+  });
+
+  test('but a mis-set tab can still be corrected', () => {
+    const S = team('Moulding');
+    log({});
+    // confirm() answers yes in the harness: "the tab was wrong, move them".
+    call(ctx, 'swStage("Finishing")');
+
+    assert.equal(rows(S)[0].stage, 'Finishing');
+    assert.equal(bal('Chair A', 'Finishing'), 10);
+    assert.equal(bal('Chair A', 'Moulding'), 0, 'it was never moulded under this tab');
+  });
+});
+
+describe('colours reach the inventory screen and the export', () => {
+  test('the inventory table lists each colour under its product', () => {
+    team('Painting');
+    log({ colour: 'Red', qty: 6 });
+    log({ colour: 'Blue', qty: 4 });
+    call(ctx, 'renderInventory()');
+
+    const html = document.getElementById('inv-fg').innerHTML;
+    assert.match(html, /↳ Chair A — Red/);
+    assert.match(html, /↳ Chair A — Blue/);
+
+    // The product row carries the full ten — that is what an order draws on —
+    // and "Ever Made" counts the colours as the product they are made of.
+    const row = html.slice(html.indexOf('>Chair A<'));
+    const cells = [...row.matchAll(/>([0-9,]+|—)</g)].slice(0, 6).map(m => m[1]);
+    assert.deepEqual(cells, ['—', '—', '10', '—', '10', '10'],
+      'Moulding, Finishing, Painting, Packing, Total, Ever Made');
+  });
+
+  test('the finished-goods export carries the colours', () => {
+    team('Painting');
+    log({ colour: 'Red', qty: 6 });
+
+    const rows2 = JSON.parse(call(ctx, `JSON.stringify((() => {
+      const out = [];
+      getAllFGProducts().forEach(name => {
+        out.push([name, ...['Moulding','Finishing','Painting','Packing'].map(st => getFGBalance(name, st))]);
+        ['Moulding','Finishing','Painting','Packing'].forEach((st, i) => {
+          fgVariantBreakdown(name, st).variants.forEach(v => out.push(['    ' + v.name, st, v.qty]));
+        });
+      });
+      return out;
+    })())`));
+
+    assert.deepEqual(rows2[0], ['Chair A', 0, 0, 6, 0]);
+    assert.deepEqual(rows2[1], ['    Chair A — Red', 'Painting', 6]);
+  });
+});
+
 describe('the pipeline conserves stock', () => {
   test('ten moulded, finished, painted and packed stay ten throughout', () => {
     team('Moulding');
