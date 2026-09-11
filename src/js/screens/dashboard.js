@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { calcOT, closedDaysExcludingOpen, getFGBalance, getRMBalance, isOverdue } from '../core/calc.js';
+import { calcOT, closedDaysExcludingOpen, getFGBalance, getRMBalance, isOverdue, prodStage } from '../core/calc.js';
 import { STAGES } from '../core/config.js';
 import { fmt, todayStr } from '../core/format.js';
 import { currentRole } from '../core/session.js';
@@ -145,7 +145,7 @@ export function renderDashboard(){
   // Stage flow
   const stageUnits = {};
   STAGES.forEach(s=>{stageUnits[s]=0;});
-  S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>{stageUnits[t.stage]=(stageUnits[t.stage]||0)+p.qty;})));
+  S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>{const st=prodStage(p,t);stageUnits[st]=(stageUnits[st]||0)+p.qty;})));
   document.getElementById('dash-teams').innerHTML = (() => {
     const allTeams = S.sessions.flatMap(ss=>(ss.teams||[]).map(t=>({...t,supName:ss.supName})));
     return allTeams.length ? allTeams.map(t=>{
@@ -253,16 +253,16 @@ export function renderTaskBoard(){
   // Only count Packing stage production
   const producedToday = {};
   S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>{
-    if(t.stage!=='Packing') return;
     t.production.forEach(p=>{
+      if(prodStage(p,t)!=='Packing') return;
       const key=(p.baseName||p.name).toLowerCase().trim();
       producedToday[key]=(producedToday[key]||0)+p.qty;
     });
   }));
   // Excludes the open day, which S.sessions above has already counted.
   closedDaysExcludingOpen().forEach(day=>(day.sessions||[]).forEach(ss=>(ss.teams||[]).forEach(t=>{
-    if(t.stage!=='Packing') return;
     (t.production||[]).forEach(p=>{
+      if(prodStage(p,t)!=='Packing') return;
       const key=(p.baseName||p.name).toLowerCase().trim();
       producedToday[key]=(producedToday[key]||0)+p.qty;
     });

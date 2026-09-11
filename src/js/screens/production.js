@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { calcOT, getFGBalance, sessionMembers, sessionProduction, sessionTeams } from '../core/calc.js';
+import { baseProductName, calcOT, fgVariantBreakdown, getFGBalance, prodStage, sessionMembers, sessionProduction, sessionTeams } from '../core/calc.js';
 import { SPC, STAGES } from '../core/config.js';
 import { fmt, fmtN, spBadge, todayStr } from '../core/format.js';
 import { S, uid } from '../core/state.js';
@@ -26,6 +26,64 @@ import { persist } from '../core/sync.js';
 // ── screen state ──
 let activeSupId = null;
 let activeTeamId = null;
+
+// Where a stage takes its goods from. Logging at a stage moves them on from
+// the one before it.
+const PREV_STAGE = {Finishing:'Moulding', Painting:'Finishing', Packing:'Painting'};
+
+/**
+ * The product list for a stage.
+ *
+ * Painted stock is held under its colour — "Chair A — Red" — so a stage fed by
+ * Painting has to be able to name one. Without this the only choices at Packing
+ * were plain catalogue products, and packing a red chair filed it as an
+ * uncoloured Chair A: the colour was lost at exactly the point someone needs to
+ * know which one is going out of the door.
+ *
+ * Colours already waiting in the previous stage come first, since they are what
+ * this stage is there to work on. A variant option carries the NAME as its
+ * value; a catalogue option carries the numeric id, as it always did.
+ */
+function productOptions(stage, q){
+  const match = name => !q || name.toLowerCase().includes(q);
+  const prev = PREV_STAGE[stage];
+
+  let variants = '';
+  if(prev){
+    const waiting = [];
+    S.fg.forEach(f => fgVariantBreakdown(f.name, prev).variants.forEach(v => {
+      if(match(v.name)) waiting.push({name:v.name, price:f.price, qty:v.qty});
+    }));
+    if(waiting.length){
+      variants = `<optgroup label="In ${prev} now">` +
+        waiting.map(v=>`<option value="${v.name}" data-price="${v.price}">${v.name} — ${fmt(v.price)} · ${v.qty} waiting</option>`).join('') +
+        '</optgroup>';
+    }
+  }
+
+  const catalogue = S.fg.filter(f=>match(f.name))
+    .map(f=>`<option value="${f.id}" data-price="${f.price}">[#${f.id}] ${f.name} — ${fmt(f.price)}</option>`).join('');
+
+  return '<option value="">— select product —</option>' + variants +
+         (variants ? '<optgroup label="Catalogue">'+catalogue+'</optgroup>' : catalogue);
+}
+
+/**
+ * The catalogue product and the exact name the supervisor picked.
+ *
+ * The dropdown holds two kinds of value: a numeric catalogue id, and the full
+ * name of a colour already in the previous stage.
+ */
+function chosenProduct(value){
+  const raw = String(value||'');
+  if(!raw) return {fg:null, name:''};
+  if(/^\d+$/.test(raw)){
+    const fg = S.fg.find(f=>f.id===parseInt(raw));
+    return {fg:fg||null, name:fg?fg.name:''};
+  }
+  const base = baseProductName(raw);
+  return {fg:S.fg.find(f=>f.name===base)||null, name:raw};
+}
 
 export function renderSupLogin(){
   // Show pending/in-production orders as task list for supervisors
@@ -219,6 +277,17 @@ export function renderSupTeamWork(sess, team){
     cfld.style.display=(team.stage==='Painting')?'block':'none';
     if(team.stage!=='Painting'){const cv=document.getElementById('sw-color-val');if(cv)cv.value='';}
   }
+  // Paint changes the colour, not the price. At Painting the rate is held at
+  // the catalogue price so a colour cannot quietly become a differently priced
+  // product — every "Chair A — Red" is worth exactly what a Chair A is worth,
+  // which is what the stock screen values it at.
+  const pfld=document.getElementById('sw-price');
+  if(pfld){
+    const painting=team.stage==='Painting';
+    pfld.readOnly=painting;
+    pfld.style.background=painting?'#F3F4F6':'';
+    pfld.title=painting?'Catalogue price — paint does not change what the product sells for':'';
+  }
 
   // Labour cost
   const lc=team.team.reduce((a,m)=>a+m.wage,0)+(team.team.reduce((a,m)=>a+calcOT(m),0));
@@ -256,8 +325,7 @@ export function renderSupTeamWork(sess, team){
   const sel=document.getElementById('sw-prod');
   const cur=sel.value;
   const q=document.getElementById('fg-search')?.value?.toLowerCase()||'';
-  sel.innerHTML='<option value="">— select product —</option>'+
-    S.fg.map(f=>`<option value="${f.id}" data-price="${f.price}">[#${f.id}] ${f.name} — ${fmt(f.price)}</option>`).join('');
+  sel.innerHTML=productOptions(team.stage, q);
   if(cur) sel.value=cur;
 
   // Add live search for product dropdown
@@ -269,10 +337,10 @@ export function renderSupTeamWork(sess, team){
     searchInput.placeholder='🔍 Search products...';
     searchInput.style.cssText='width:100%;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;color:#111827;padding:7px 10px;font-family:var(--body);font-size:12px;margin-bottom:8px;outline:none';
     searchInput.oninput=function(){
-      const q=this.value.toLowerCase();
-      const sel=document.getElementById('sw-prod');
-      sel.innerHTML='<option value="">— select product —</option>'+
-        S.fg.filter(f=>!q||f.name.toLowerCase().includes(q)).map(f=>`<option value="${f.id}" data-price="${f.price}">[#${f.id}] ${f.name} — ${fmt(f.price)}</option>`).join('');
+      const sess2=S.sessions.find(ss=>ss.supId===activeSupId);
+      const t2=sess2&&sess2.teams?sess2.teams.find(t3=>t3.teamId===activeTeamId):null;
+      document.getElementById('sw-prod').innerHTML=
+        productOptions(t2?t2.stage:'Moulding', this.value.toLowerCase());
     };
     sel.parentNode.insertBefore(searchInput, sel);
   }
@@ -284,7 +352,9 @@ export function renderSupTeamWork(sess, team){
   const lc2=team.team.reduce((a,m)=>a+m.wage,0)+team.team.reduce((a,m)=>a+calcOT(m),0);
   pt.innerHTML=`<table class="tbl"><thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Wt/pc</th><th class="num">Total Wt</th><th class="num">₹/kg</th><th class="num">₹/unit</th><th class="num">Total</th><th></th></tr></thead>
   <tbody>${team.production.map((p,i)=>{const wt=p.weightPerPc||0;const tw=p.totalWeight||0;const rpkg=wt>0?Math.round(p.unitVal/wt):0;
-    return`<tr><td style="font-weight:500;color:#111827">${p.name}</td><td class="num">${p.qty}</td><td class="num">${wt||'—'}</td><td class="num">${tw?fmtN(tw)+' kg':'—'}</td><td class="num" style="color:#B45309">${rpkg?fmt(rpkg):'—'}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(p.value)}</td><td><button class="btn btn-ember btn-xs" data-click="delProd" data-args="[${i}]">✕</button></td></tr>`;}).join('')}
+    const rowStage=prodStage(p,team);
+    const elsewhere=rowStage!==team.stage?` <span class="sp ${SPC[STAGES.indexOf(rowStage)]}" style="font-size:9px">${rowStage}</span>`:'';
+    return`<tr><td style="font-weight:500;color:#111827">${p.name}${elsewhere}</td><td class="num">${p.qty}</td><td class="num">${wt||'—'}</td><td class="num">${tw?fmtN(tw)+' kg':'—'}</td><td class="num" style="color:#B45309">${rpkg?fmt(rpkg):'—'}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(p.value)}</td><td><button class="btn btn-ember btn-xs" data-click="delProd" data-args="[${i}]">✕</button></td></tr>`;}).join('')}
   </tbody></table>
   <div style="display:flex;justify-content:flex-end;gap:16px;font-family:var(--mono);font-size:11px;margin-top:9px;padding-top:9px;border-top:1px solid #F3F4F6">
     <span>Goods: <span style="color:#065F46">${fmt(tv)}</span></span>
@@ -296,7 +366,27 @@ export function swStage(s){
   const sess=S.sessions.find(ss=>ss.supId===activeSupId);
   if(sess&&activeTeamId!==null){
     const team=sess.teams.find(t=>t.teamId===activeTeamId);
-    if(team){team.stage=s;persist();}
+    if(team&&team.stage!==s){
+      // Moving the tab used to move everything the team had already logged
+      // with it, silently: log ten at Painting, switch to Packing to log the
+      // packing, and the ten painted ones were restated as packed. Stock for a
+      // day that was finished hours ago changed under the user's feet.
+      //
+      // Both readings are legitimate — a mis-set tab needs correcting, and a
+      // team moving on to the next stage must not drag its history — so the
+      // one the user meant is the one to ask for. Rows keep the stage they
+      // were logged at unless the answer is yes.
+      const logged=(team.production||[]).filter(p=>(p.stage||team.stage)===team.stage);
+      if(logged.length&&!confirm(
+        logged.length+' item'+(logged.length===1?'':'s')+' already logged under '+team.stage+'.\n\n'+
+        'OK — the tab was wrong: move them to '+s+' as well.\n'+
+        'Cancel — the team is moving on: leave them in '+team.stage+'.')){
+        (team.production||[]).forEach(p=>{ if(!p.stage) p.stage=team.stage; });
+      } else {
+        logged.forEach(p=>{ p.stage=s; });
+      }
+      team.stage=s;persist();
+    } else if(team){team.stage=s;persist();}
   }
   renderSupWork();
 }
@@ -329,7 +419,9 @@ export function logProd(){
     sess.teams.push(team);activeTeamId=team.teamId;
   }
   const sel=document.getElementById('sw-prod');
-  const fg=S.fg.find(f=>f.id===parseInt(sel.value));
+  // Either a catalogue id or the full name of a colour waiting in the previous
+  // stage — chosenProduct() resolves both to the catalogue product behind it.
+  const {fg, name:pickedName}=chosenProduct(sel.value);
   const qty=parseFloat(document.getElementById('sw-qty').value)||0;
   const uv=parseFloat(document.getElementById('sw-price').value)||0;
   const wt=parseFloat(document.getElementById('sw-weight')?.value)||0;
@@ -337,23 +429,41 @@ export function logProd(){
 
   const currentStage = team.stage||'Moulding';
 
-  // Colour — optional text field shown only for Painting stage
+  // The rate the goods are booked at. The ₹/unit box is held read-only during
+  // Painting, but a product picked before the stage was switched can leave a
+  // stale figure in it, so the catalogue price wins outright here.
+  const unitVal = (currentStage==='Painting' && fg.price) ? fg.price : uv;
+
+  // Colour — required at Painting, and nowhere else.
+  //
+  // A painted item IS its colour: the stock screen lists "Chair A — Red" as its
+  // own line, and packing and dispatch draw from it. Letting the field through
+  // empty filed painted goods back under the plain product, where nobody could
+  // tell one colour from another afterwards.
   let colour = '';
   if(currentStage==='Painting'){
     colour = (document.getElementById('sw-color-val')?.value||'').trim();
+    if(!colour){
+      alert('Which colour was it painted in?\n\nPainted stock is tracked per colour, so this cannot be left blank.');
+      document.getElementById('sw-color-val')?.focus();
+      return;
+    }
   }
 
-  // Product name: "Garden Pot L — Orange" for Painting, normal for others
-  const prodName = (currentStage==='Painting' && colour) ? fg.name+' — '+colour : fg.name;
+  // What this stage produces. Painting names the colour it just applied — from
+  // the CATALOGUE name, so repainting cannot stack "Chair A — Red — Blue".
+  // Every other stage keeps the name it took off the shelf, which is how a
+  // colour survives Packing and reaches the order it is dispatched against.
+  const prodName = (currentStage==='Painting' && colour) ? fg.name+' — '+colour : pickedName;
 
-  // Auto-transfer from previous stage
-  const PREV_STAGE = {Finishing:'Moulding',Painting:'Finishing',Packing:'Painting'};
   const prevStage = PREV_STAGE[currentStage];
 
   if(prevStage){
     if(!S.fgTransfers) S.fgTransfers=[];
-    // For Painting, check against the base product name (without colour) in Finishing
-    const checkName = currentStage==='Painting' ? fg.name : prodName;
+    // What is consumed from the previous stage: the item as it was picked.
+    // Painting takes plain stock and gives it a colour, so it consumes the
+    // catalogue product rather than the name it is about to create.
+    const checkName = currentStage==='Painting' ? baseProductName(pickedName) : pickedName;
     const available = getFGBalance(checkName, prevStage);
     if(available < qty){
       const proceed = confirm('Only '+available+' in '+prevStage+'. Produce '+qty+' in '+currentStage+'?');
@@ -378,8 +488,8 @@ export function logProd(){
   }
 
   team.production.push({
-    name:prodName, baseName:fg.name, colour:colour,
-    qty,unitVal:uv,value:qty*uv,weightPerPc:wt,totalWeight:wt*qty
+    name:prodName, baseName:fg.name, colour:colour, stage:currentStage,
+    qty,unitVal:unitVal,value:qty*unitVal,weightPerPc:wt,totalWeight:wt*qty
   });
 
   // If Packing stage — offer to assign to order

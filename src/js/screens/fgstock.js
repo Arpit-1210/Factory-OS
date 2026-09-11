@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { baseProductName, getFGBalance } from '../core/calc.js';
+import { baseProductName, fgVariantBreakdown, getFGBalance } from '../core/calc.js';
 import { renderOpeningNotice } from './fgopening.js';
 import { FG_STAGES } from '../core/config.js';
 import { fmt, fmtN, todayStr } from '../core/format.js';
@@ -49,6 +49,9 @@ export function renderFGStock(){
   // Also from production logs
   S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>allProducts.add(p.name))));
   S.ledger.forEach(day=>(day.sessions||[]).forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>allProducts.add(p.name)))));
+  // The catalogue products behind those names — "Chair A — Red" is stock of a
+  // Chair A, and the colour split is derived per stage below.
+  const bases=new Set([...allProducts].map(baseProductName));
 
   const stagesToShow=activeFGStage==='all'?FG_STAGES:[activeFGStage];
   const stageColors={Moulding:'#EFF6FF|#1D4ED8|#BFDBFE',Finishing:'#FFFBEB|#B45309|#FDE68A',Painting:'#ECFDF5|#065F46|#A7F3D0',Packing:'#FAF5FF|#6B21A8|#E9D5FF'};
@@ -56,13 +59,23 @@ export function renderFGStock(){
   let html2='';
   stagesToShow.forEach(stage=>{
     const [bg,color,border]=stageColors[stage].split('|');
-    // Products with stock at this stage
-    const stageProds=[...allProducts].map(name=>({name,qty:getFGBalance(name,stage)})).filter(p=>p.qty>0);
+    // Products with stock at this stage, painted stock listed by colour.
+    //
+    // Built from the CATALOGUE product, never from the full list of names: a
+    // painted row answers to "Garden Pot L" and to "Garden Pot L — Orange"
+    // alike, so listing both names showed the same pots twice and doubled the
+    // stage total. fgVariantBreakdown() splits the one real balance instead.
+    const stageProds=[...bases].flatMap(base=>{
+      const {variants, plain} = fgVariantBreakdown(base, stage);
+      const rows = variants.map(v=>({name:v.name, qty:v.qty, base}));
+      if(plain>0) rows.unshift({name:base, qty:plain, base});
+      return rows;
+    });
     const totalQty=stageProds.reduce((a,p)=>a+p.qty,0);
+    // A colour is not priced separately — paint does not change what the
+    // product sells for — so every row is valued at its catalogue price.
     const totalVal=stageProds.reduce((a,p)=>{
-      // For colour variants like "Garden Pot L — Orange", look up base name
-      const baseName = baseProductName(p.name);
-      const fg=S.fg.find(f=>f.name===p.name)||S.fg.find(f=>f.name===baseName);
+      const fg=S.fg.find(f=>f.name===p.base)||S.fg.find(f=>f.name===p.name);
       return a+(fg?p.qty*fg.price:0);
     },0);
 
@@ -79,7 +92,8 @@ export function renderFGStock(){
         <th>Action</th>
       </tr></thead><tbody>
       ${stageProds.map(p=>{
-        const fg=S.fg.find(f=>f.name===p.name);
+        // Catalogue price of the product, colour or not — see totalVal above.
+        const fg=S.fg.find(f=>f.name===p.base)||S.fg.find(f=>f.name===p.name);
         const val=fg?p.qty*fg.price:0;
         const nextStage=FG_STAGES[FG_STAGES.indexOf(stage)+1]||'Dispatch';
         return`<tr>
@@ -181,12 +195,26 @@ export function saveFGAdjust(){
   persist();closeFGAdjust();renderFGStock();
   alert(`✓ Adjustment saved: ${prod} ${qty>0?'+':''}${qty} at ${stage}`);
 }
+/**
+ * Every CATALOGUE product the factory has any record of.
+ *
+ * Colour variants are folded back into the product they are made of. Callers
+ * use this to sweep stock across the four stages, and a painted row answers to
+ * "Chair A — Red" as well as to "Chair A", so listing both names counted the
+ * same goods twice — the dashboard's "ready to dispatch" tally, the inventory
+ * screen's totals and the Excel export all read roughly double once anything
+ * had been painted. Worse, a variant's own balance goes stale the moment the
+ * goods move on under the plain name, because the packing and dispatch records
+ * are written against the catalogue product.
+ *
+ * fgVariantBreakdown() is the way to see the colours inside a stage.
+ */
 export function getAllFGProducts(){
   const all=new Set();
   S.fg.forEach(f=>all.add(f.name));
-  S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>all.add(p.name))));
-  S.ledger.forEach(day=>(day.sessions||[]).forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>all.add(p.name)))));
-  (S.fgTransfers||[]).forEach(t=>{all.add(t.product);});
+  S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>all.add(baseProductName(p.name)))));
+  S.ledger.forEach(day=>(day.sessions||[]).forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>all.add(baseProductName(p.name))))));
+  (S.fgTransfers||[]).forEach(t=>{all.add(baseProductName(t.product));});
   return [...all].sort();
 }
 

@@ -100,6 +100,93 @@ export function baseProductName(name){
   return s.includes(' — ') ? s.split(' — ')[0] : s;
 }
 
+/**
+ * The stage a production row belongs to.
+ *
+ * Rows are stamped with their stage when they are logged. Older rows, written
+ * before that, have only the team's stage to go on — which is what every
+ * reader used to use, and why moving a team's stage tab silently moved
+ * everything it had already logged to the new stage along with it.
+ */
+export function prodStage(p, team){
+  return (p && p.stage) || (team && team.stage) || 'Moulding';
+}
+
+/**
+ * What a stage holds, split by paint colour.
+ *
+ * Painting logs "Chair A — Red"; everything downstream — the transfer records,
+ * the order items, the dispatch deduction — is written against the catalogue
+ * name "Chair A". getFGBalance() therefore rolls variants up into the base
+ * product on purpose: an order for a Chair A has to be fillable by a red one.
+ *
+ * The stock screen wants the opposite view, and asking it for both names
+ * counted the same goods twice, because a coloured production row answers to
+ * its own name AND to its base. So the split is derived here instead, from the
+ * authoritative base balance:
+ *
+ *   · each colour starts at what was painted in it, less anything moved out
+ *     under that exact colour name;
+ *   · the total is then capped at the real base balance, newest colour first,
+ *     so a move recorded against the plain name (packing, dispatch) drains the
+ *     oldest paint first — FIFO, and the colours can never sum to more than
+ *     the stage actually holds;
+ *   · whatever is left over is stock with no colour on it.
+ *
+ * Returns { variants: [{name, colour, qty}], plain, total }.
+ */
+export function fgVariantBreakdown(base, stage, asOf){
+  const cutoff = asOf || asOfDate();
+  const total  = getFGBalance(base, stage, asOf);
+
+  // Painted rows at this stage, oldest first.
+  const made = [];
+  const collect = sessions => (sessions||[]).forEach(ss =>
+    (ss.teams||[]).forEach(t =>
+      (t.production||[]).forEach(p => {
+        if(prodStage(p,t)!==stage) return;
+        const name = p.name;
+        if(!name || name===base) return;              // not a colour variant
+        if(baseProductName(name)!==base) return;      // a different product
+        made.push({ name, qty: p.qty||0 });
+      })));
+  closedDaysExcludingOpen().filter(d=>upTo(d.date, cutoff)).forEach(d=>collect(d.sessions));
+  if(upTo(S.workDate, cutoff)) collect(S.sessions);
+
+  // Merge repeats of the same colour, keeping first-painted order.
+  const order = [];
+  const byName = new Map();
+  made.forEach(m => {
+    if(!byName.has(m.name)){ byName.set(m.name, 0); order.push(m.name); }
+    byName.set(m.name, byName.get(m.name) + m.qty);
+  });
+
+  // Anything moved out of this stage under the exact colour name.
+  order.forEach(name => {
+    const movedOut = (S.fgTransfers||[])
+      .filter(t=>t.from===stage && upTo(t.date, cutoff))
+      .filter(t=>(t.productOut||t.product)===name)
+      .reduce((a,t)=>a+t.qty,0);
+    byName.set(name, Math.max(0, byName.get(name) - movedOut));
+  });
+
+  // Cap at what the stage really holds, newest paint kept last.
+  let room = total;
+  const kept = new Map();
+  for(let i=order.length-1; i>=0; i--){
+    const name = order[i];
+    const q = Math.max(0, Math.min(byName.get(name), room));
+    room -= q;
+    kept.set(name, q);
+  }
+
+  const variants = order
+    .filter(name => kept.get(name) > 0)
+    .map(name => ({ name, colour: name.split(' — ')[1] || '', qty: kept.get(name) }));
+
+  return { variants, plain: Math.max(0, room), total };
+}
+
 export function getFGBalance(productName, stage, asOf){
   if(!S.fgStock) return 0;
   const cutoff = asOf || asOfDate();
@@ -118,19 +205,25 @@ export function getFGBalance(productName, stage, asOf){
   // 2. Production logged directly at this stage (open day + history).
   //    The open day's sessions belong to S.workDate, so they count only when
   //    that day is itself within the cut-off.
+  //    Each row is counted at the stage it was LOGGED at — prodStage() — not
+  //    at whatever stage its team happens to be on now. A team's stage is a
+  //    property of the team, so switching the tab used to drag everything the
+  //    team had already logged along with it and restate stock for a day that
+  //    was finished hours ago.
+  const mine = p => (p.baseName||p.name)===productName||p.name===productName;
   const producedToday = upTo(S.workDate, cutoff) ? S.sessions.reduce((a,ss)=>
-    a+(ss.teams||[]).filter(t=>t.stage===stage)
-      .reduce((b,t)=>b+t.production
-        .filter(p=>(p.baseName||p.name)===productName||p.name===productName)
+    a+(ss.teams||[])
+      .reduce((b,t)=>b+(t.production||[])
+        .filter(p=>prodStage(p,t)===stage&&mine(p))
         .reduce((c,p)=>c+p.qty,0),0)
   ,0) : 0;
   const producedHistory = closedDaysExcludingOpen()
     .filter(day=>upTo(day.date, cutoff))
     .reduce((a,day)=>
       a+(day.sessions||[]).reduce((b,ss)=>
-        b+(ss.teams||[]).filter(t=>t.stage===stage)
+        b+(ss.teams||[])
           .reduce((c,t)=>c+(t.production||[])
-            .filter(p=>(p.baseName||p.name)===productName||p.name===productName)
+            .filter(p=>prodStage(p,t)===stage&&mine(p))
             .reduce((d,p)=>d+p.qty,0),0)
       ,0)
     ,0);
@@ -143,21 +236,41 @@ export function getFGBalance(productName, stage, asOf){
   //    "all-time production minus today's transfers only": every transfer out
   //    from every previous day vanished from the balance, so stage stock
   //    inflated a little more each day, on every device.
+  //    An AUTO transfer is skipped on the way IN. The Supervisor screen writes
+  //    two records for one event: logging 10 at Painting pushes a production
+  //    row at Painting AND a Finishing→Painting transfer to debit the source.
+  //    Counting both credited the destination twice, so ten chairs moved into a
+  //    stage were reported as twenty — at every stage, coloured or not, and the
+  //    inflation compounded down the pipeline. The production row is the credit;
+  //    the auto transfer exists only to debit the stage the goods came from,
+  //    which is why it is still counted in full under transferredOut below.
+  //    A hand-made transfer (Quick Transfer, the transfer form, a dispatch) has
+  //    no production row behind it and is credited normally.
+  //    Movements roll up the same way production does: a query for "Chair A"
+  //    answers for its colours too, so a move recorded against "Chair A — Red"
+  //    counts against Chair A. Without that the base balance kept goods it had
+  //    already sent on, because packing a colour names the colour. It does not
+  //    work the other way — a move named for the plain product is not deducted
+  //    from a particular colour, which is what fgVariantBreakdown() settles.
+  const rollsUp = n => n===productName || baseProductName(n)===productName;
+
   const REAL_STAGES = ['Moulding','Finishing','Painting','Packing'];
   const transferredIn = (S.fgTransfers||[]).filter(t=>{
     if(t.to!==stage) return false;
+    if(t.auto) return false;
     if(!REAL_STAGES.includes(t.from)) return false; // skip Unit2, external etc
     if(!upTo(t.date, cutoff)) return false;
-    const inName = t.productIn||t.product;
-    return inName===productName||t.product===productName;
+    return rollsUp(t.productIn||t.product) || rollsUp(t.product);
   }).reduce((a,t)=>a+t.qty,0);
 
   // 4. Transferred OUT from this stage (to another stage, Order, Dispatch, Unit2)
+  //    Matched on the name that LEFT. A painting move carries productOut
+  //    "Chair A" and productIn "Chair A — Red"; reading productIn here debited
+  //    the colour it turned into rather than the plain stock it consumed.
   const transferredOut = (S.fgTransfers||[]).filter(t=>{
     if(t.from!==stage) return false;
     if(!upTo(t.date, cutoff)) return false;
-    const outName = t.productIn||t.product;
-    return outName===productName||t.product===productName;
+    return rollsUp(t.productOut||t.product) || rollsUp(t.product);
   }).reduce((a,t)=>a+t.qty,0);
 
   // 5. Manual adjustments
