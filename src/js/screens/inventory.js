@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { baseProductName, getFGBalance, getRMBalance } from '../core/calc.js';
+import { baseProductName, fgVariantBreakdown, getFGBalance, getRMBalance } from '../core/calc.js';
 import { FG_STAGES } from '../core/config.js';
 import { fmt, fmtN, todayStr } from '../core/format.js';
 import { S } from '../core/state.js';
@@ -128,11 +128,16 @@ export function renderInventory(){
 
   // Total ever produced (all stages combined, all time)
   function getTotalEverProduced(productName){
+    // Colours count towards the product they are made of. This matched the
+    // logged name exactly, so once the rows in this table became catalogue
+    // products a painted run showed "Ever Made 0" beside the stock it had
+    // plainly produced.
+    const isMine = p => (p.baseName||p.name)===productName||p.name===productName;
     const today = S.sessions.reduce((a,ss)=>{
-      return a+(ss.teams||[]).reduce((b,t)=>b+t.production.filter(p=>p.name===productName).reduce((c,p)=>c+p.qty,0),0);
+      return a+(ss.teams||[]).reduce((b,t)=>b+t.production.filter(isMine).reduce((c,p)=>c+p.qty,0),0);
     },0);
     const history = S.ledger.reduce((a,day)=>{
-      return a+(day.sessions||[]).reduce((b,ss)=>b+(ss.teams||[]).reduce((c,t)=>c+t.production.filter(p=>p.name===productName).reduce((d,p)=>d+p.qty,0),0),0);
+      return a+(day.sessions||[]).reduce((b,ss)=>b+(ss.teams||[]).reduce((c,t)=>c+t.production.filter(isMine).reduce((d,p)=>d+p.qty,0),0),0);
     },0);
     return today + history;
   }
@@ -172,6 +177,28 @@ export function renderInventory(){
           <span style="color:var(--jade);font-weight:700">+${t.qty}</span>
           <span style="color:var(--text4)">${(t.to||'').slice(0,4)}</span>
         </span>`).join('');
+        // Colours inside those per-stage totals. The product row keeps the
+        // full figure — an order is placed for a Chair A, not a red one — and
+        // each colour is listed beneath it so the floor can see which is which.
+        const colours={};
+        FG_STAGES.forEach((st,i)=>fgVariantBreakdown(p,st).variants.forEach(v=>{
+          if(!colours[v.name]) colours[v.name]=FG_STAGES.map(()=>0);
+          colours[v.name][i]=v.qty;
+        }));
+        const colourRows=Object.keys(colours).map(vn=>{
+          const cq=colours[vn];
+          const ct=cq.reduce((a,q2)=>a+q2,0);
+          return`<tr style="background:var(--surface2)">
+            <td style="padding-left:22px;color:var(--text3);font-size:12px">↳ ${vn}</td>
+            ${cq.map(q2=>`<td class="num" style="font-size:12px;color:${q2>0?'var(--text3)':'#E5E7EB'}">${q2>0?q2:'—'}</td>`).join('')}
+            <td class="num" style="color:var(--text3);font-size:12px">${ct}</td>
+            <td class="num" style="color:#E5E7EB">—</td>
+            <td class="num" style="color:var(--text4);font-size:12px">${fg?fmtN(fg.price):'—'}</td>
+            <td class="num" style="color:var(--text4);font-size:12px">${fg?fmtN(ct*fg.price):'—'}</td>
+            <td><span style="color:#E5E7EB;font-size:10px">—</span></td>
+          </tr>`;
+        }).join('');
+
         return`<tr>
           <td style="font-weight:500;color:var(--text)">${p}</td>
           ${qtys.map((q2,i)=>`<td class="num" style="font-weight:${q2>0?'700':'400'};color:${q2>0?'var(--text)':'#E5E7EB'}">${q2>0?q2:'—'}</td>`).join('')}
@@ -180,7 +207,7 @@ export function renderInventory(){
           <td class="num" style="color:var(--text3)">${fg?fmtN(fg.price):'—'}</td>
           <td class="num" style="color:var(--jade);font-weight:600">${val?fmtN(val):'—'}</td>
           <td style="min-width:100px">${transStr||'<span style="color:#E5E7EB;font-size:10px">—</span>'}</td>
-        </tr>`;
+        </tr>${colourRows}`;
       }).join('')}
       </tbody></table>
       <div style="font-family:var(--mono);font-size:10px;color:var(--text4);margin-top:10px;text-align:right">

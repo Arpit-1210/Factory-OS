@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { calcOT, closedDaysExcludingOpen, getFGBalance, getRMBalance } from '../core/calc.js';
+import { calcOT, closedDaysExcludingOpen, fgVariantBreakdown, getFGBalance, getRMBalance, prodStage } from '../core/calc.js';
 import { FG_STAGES } from '../core/config.js';
 import { todayStr } from '../core/format.js';
 import { S } from '../core/state.js';
@@ -75,11 +75,11 @@ export function exportProduction(){
   const rows=[['Date','Supervisor','Stage','Product','Qty','Unit Value','Total Value']];
   if(inRange(S.workDate||todayStr(),from,to)){
     S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>{
-      rows.push([S.workDate,ss.supName,t.stage,p.name,p.qty,p.unitVal||0,p.value||0]);
+      rows.push([S.workDate,ss.supName,prodStage(p,t),p.name,p.qty,p.unitVal||0,p.value||0]);
     })));
   }
   closedDaysExcludingOpen().filter(e=>inRange(e.date,from,to)).forEach(day=>(day.sessions||[]).forEach(ss=>(ss.teams||[]).forEach(t=>(t.production||[]).forEach(p=>{
-    rows.push([day.date,ss.supName,t.stage,p.name,p.qty,p.unitVal||0,p.value||0]);
+    rows.push([day.date,ss.supName,prodStage(p,t),p.name,p.qty,p.unitVal||0,p.value||0]);
   }))));
   const ws=XLSX.utils.aoa_to_sheet(rows);const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Production');
@@ -126,6 +126,16 @@ export function exportInventory(){
   (getAllFGProducts()||[]).forEach(name=>{
     const per=FG_STAGES.map(st=>getFGBalance(name,st));
     fgRows.push([name,...per,per.reduce((a,b)=>a+b,0)]);
+    // Painted stock, listed under the product whose totals already include it.
+    const colours={};
+    FG_STAGES.forEach((st,i)=>fgVariantBreakdown(name,st).variants.forEach(v=>{
+      if(!colours[v.name]) colours[v.name]=FG_STAGES.map(()=>0);
+      colours[v.name][i]=v.qty;
+    }));
+    Object.keys(colours).forEach(vn=>{
+      const cq=colours[vn];
+      fgRows.push(['    '+vn,...cq,cq.reduce((a,b)=>a+b,0)]);
+    });
   });
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(fgRows),'Finished Goods');
 
