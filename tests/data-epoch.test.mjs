@@ -10,7 +10,7 @@
 // device drops its cache and reloads onto whatever Postgres holds.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { bootDb } from './harness.mjs';
+import { boot, bootDb, getState, call } from './harness.mjs';
 
 const EPOCH = '2026-09-11T16:00:00.000Z';
 const STATE_KEYS = ['frp_factory_v5', '_sessions_backup_', '_sb_outbox', '_att_dirty'];
@@ -32,6 +32,42 @@ function fakeSupabase({ epoch = EPOCH, error = null, missing = false } = {}) {
       not() { return q; }, update() { return q; }, delete() { return q; },
       upsert(rows) { return Promise.resolve({ data: rows, error: null }); },
       then(res) { return Promise.resolve({ data: [], error: null }).then(res); },
+    };
+    return q;
+  };
+  return {
+    createClient: () => ({
+      from: query,
+      rpc: () => Promise.resolve({ data: null, error: null }),
+      auth: {
+        getSession: () => Promise.resolve({ data: { session: null } }),
+        signInWithPassword: () => Promise.resolve({ data: null, error: null }),
+        signOut: () => Promise.resolve({ error: null }),
+      },
+      channel: () => { const ch = { on: () => ch, subscribe: () => ch }; return ch; },
+      removeChannel: () => {},
+    }),
+  };
+}
+
+/**
+ * A fake supabase serving whole tables, for driving a real pull().
+ * `tables` is { tableName: rows }; anything absent reads as empty.
+ */
+function fakeTables(tables) {
+  const query = (table) => {
+    const rows = () => (tables[table] || [])
+      .filter(r => q._f.every(([c, v]) => r[c] === v));
+    const q = {
+      _f: [],
+      select() { return q; },
+      eq(c, v) { q._f.push([c, v]); return q; },
+      order() { return q; },
+      not() { return q; }, update() { return q; }, delete() { return q; },
+      maybeSingle() { return Promise.resolve({ data: rows()[0] || null, error: null }); },
+      single() { return q.maybeSingle(); },
+      upsert(r) { return Promise.resolve({ data: r, error: null }); },
+      then(res) { return Promise.resolve({ data: rows(), error: null }).then(res); },
     };
     return q;
   };
@@ -143,6 +179,104 @@ describe('the check never stops the factory loading', () => {
     assert.equal(await d.DB.enforceEpoch(), false);
     assert.equal(d.reloads.count, 0);
     assert.notEqual(d.localStorage.getItem('frp_factory_v5'), null, 'state untouched');
+  });
+});
+
+describe('what the floor actually sees afterwards', () => {
+  // The question this whole mechanism has to answer: someone picks up a phone
+  // that still holds the deleted data — do they end up looking at the database
+  // or at the cache? Simulated across the reload, in two boots, because the
+  // reload is the point at which the cache stops existing.
+  test('the app shows the database, not the cache', async () => {
+    // The server: data cleared, workers restored, epoch bumped.
+    const server = {
+      data_epoch: [{ id: 1, epoch: EPOCH }],
+      workers: [
+        { id: 1,   name: 'Ajay',             role: 'Floor worker', wage: 450, is_supervisor: false, active: true },
+        { id: 209, name: 'SUBODH CHOUDHARY', role: 'Supervisor',   wage: 700, is_supervisor: true,  active: true },
+      ],
+      fg_catalogue: [{ id: 1, name: 'Chair A', price: 900 }],
+      rm_catalogue: [{ id: 1, name: 'Resin', unit: 'kg', price: 220 }],
+      // Everything operational is empty, exactly as Postgres is now.
+      attendance: [], production_sessions: [], raw_log: [], fg_transfers: [],
+      fg_stock: [], day_ledger: [], factory_doc: [], rm_stock_opening: [],
+    };
+    const sb = fakeTables(server);
+
+    // ── BOOT 1: the phone as it is today — stale cache, no epoch recorded.
+    const one = boot({
+      supabase: sb,
+      localStorageSeed: staleCache(),
+      globals: { location: { href: 'http://localhost/', origin: 'http://localhost',
+                             reload() { one.reloaded = true; } } },
+    });
+    await call(one.ctx, 'FactoryDB.init()');
+    const S1 = getState(one.ctx);
+    assert.ok((S1.sessions || []).length > 0, 'it starts out showing the deleted session');
+
+    await call(one.ctx, 'FactoryDB.pull(S)');
+    assert.equal(one.reloaded, true, 'the device resets itself');
+    for (const k of STATE_KEYS) {
+      assert.equal(one.localStorage.getItem(k), null, k + ' is gone');
+    }
+
+    // ── BOOT 2: what that reload lands on — only the epoch survives.
+    const carried = {};
+    const epochSeen = one.localStorage.getItem('_data_epoch');
+    if (epochSeen) carried._data_epoch = epochSeen;
+
+    const two = boot({ supabase: fakeTables(server), localStorageSeed: carried });
+    await call(two.ctx, 'FactoryDB.init()');
+    await call(two.ctx, 'FactoryDB.pull(S)');
+    const S2 = getState(two.ctx);
+
+    assert.equal((S2.sessions || []).length, 0, 'no sessions — the database has none');
+    assert.equal((S2.ledger || []).length, 0, 'no closed days');
+    assert.equal((S2.rawLog || []).length, 0, 'no raw material issued');
+    assert.equal((S2.fgTransfers || []).length, 0, 'no stage movements');
+    assert.equal((S2.lab || []).length, 2, 'the workers the database holds');
+    assert.deepEqual((S2.lab || []).map(l => l.name).sort(),
+      ['Ajay', 'SUBODH CHOUDHARY'], 'by name, from Postgres');
+    assert.equal((S2.lab || []).filter(l => l.present).length, 0,
+      'and nobody is marked present, because attendance was cleared');
+    assert.equal(two.localStorage.getItem('_data_epoch'), EPOCH,
+      'the epoch is remembered, so this does not happen again');
+  });
+});
+
+describe('the reset survives a write that lands after it', () => {
+  // location.reload() does not stop the running script. pullFromFirebase()
+  // writes S back to the state key on the line after the pull, so the cache
+  // can be re-created between the reset and the actual unload — and with the
+  // new epoch already recorded, the device would never reset again.
+  test('a marker, not the deletes, is what makes it stick', async () => {
+    const d = await device({ seed: staleCache() });
+    await d.DB.enforceEpoch();
+    assert.equal(d.localStorage.getItem('_reset_pending'), '1');
+
+    // The race: sync.js writes the stale state straight back.
+    d.localStorage.setItem('frp_factory_v5',
+      JSON.stringify({ sessions: [{ supId: 1 }], ledger: [{ date: '2026-09-10' }] }));
+
+    // Next boot lands on that write — and must still start clean.
+    const next = boot({ supabase: fakeTables({ data_epoch: [{ id: 1, epoch: EPOCH }] }),
+                        localStorageSeed: {
+                          _reset_pending: d.localStorage.getItem('_reset_pending'),
+                          _data_epoch: d.localStorage.getItem('_data_epoch'),
+                          frp_factory_v5: d.localStorage.getItem('frp_factory_v5'),
+                        } });
+    const S = getState(next.ctx);
+
+    assert.equal((S.sessions || []).length, 0, 'the resurrected session is discarded');
+    assert.equal((S.ledger || []).length, 0, 'and so is the ledger');
+    assert.equal(next.localStorage.getItem('_reset_pending'), null,
+      'the marker is consumed, so this happens exactly once');
+
+    // The app re-saves a cache as it boots, which is fine — what matters is
+    // that the thing it saves is the clean state, not the resurrected one.
+    const resaved = JSON.parse(next.localStorage.getItem('frp_factory_v5') || '{}');
+    assert.equal((resaved.sessions || []).length, 0, 'the new cache carries no sessions');
+    assert.equal((resaved.ledger || []).length, 0, 'and no ledger');
   });
 });
 
