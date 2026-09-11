@@ -49,7 +49,34 @@ export function defaultState() {
  * Rehydrate from localStorage, merged over defaults so a state saved by an
  * older build gains any keys added since.
  */
+// ── A RESET ORDERED BY THE SERVER ──
+//
+// supabase-db.js sets `_reset_pending` when data_epoch says the owner has
+// cleared data since this device last looked, and reloads.
+//
+// It cannot simply delete the cache there and trust that to hold.
+// location.reload() does not stop the current script: everything queued after
+// it still runs, and pullFromFirebase() writes S straight back to LS_KEY on
+// the very next line. That write would re-create the cache that had just been
+// deleted — and because the new epoch was already recorded, the device would
+// never reset again. Permanently stale, silently.
+//
+// So the marker is what survives, and the next boot starts from defaults no
+// matter what got written in between. Keys duplicated rather than imported:
+// supabase-db.js is a classic script loaded before the module graph.
+const RESET_KEY  = '_reset_pending';
+const CACHE_KEYS = ['frp_factory_v5', '_sessions_backup_', '_sb_outbox', '_att_dirty'];
+
 export function loadState() {
+  try {
+    if (localStorage.getItem(RESET_KEY)) {
+      CACHE_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+      localStorage.removeItem(RESET_KEY);
+      console.warn('[state] server-ordered reset — starting from the database');
+      return defaultState();
+    }
+  } catch (e) { /* storage unavailable: nothing to reset */ }
+
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {

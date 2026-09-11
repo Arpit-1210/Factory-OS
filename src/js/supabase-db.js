@@ -31,6 +31,77 @@
   var OUTBOX_KEY = '_sb_outbox';
   var flushing = false;
 
+  // ── MAKING A SERVER-SIDE CLEAR REACH THE DEVICES ────────────────
+  //
+  // Everything this device knows is mirrored in localStorage, and pull()
+  // deliberately keeps its local rows whenever the server looks empty — the
+  // guard that stops a half-loaded phone from wiping the factory. The cost is
+  // that clearing data in Postgres never arrives: the device keeps showing the
+  // old figures, and an owner device pushes them all back on the next edit.
+  //
+  // There is no way to reach into another browser's storage, so the device has
+  // to be told to let go. `data_epoch` holds one timestamp; the owner bumps it
+  // after clearing data, every device sees its own copy is older, drops these
+  // four keys and reloads onto whatever Postgres actually holds.
+  //
+  // All four, because any one of them puts the data back:
+  //   · the state blob itself;
+  //   · the five-minutely session snapshot app.js restores on load;
+  //   · the offline outbox, which would RE-PUSH the cleared rows;
+  //   · the attendance dirty claims, same.
+  var EPOCH_KEY = '_data_epoch';
+  var CACHE_KEYS = ['frp_factory_v5', '_sessions_backup_', OUTBOX_KEY, '_att_dirty'];
+
+  /**
+   * Drop this device's cache if the owner has cleared data since it last looked.
+   *
+   * Returns true when a reload has been started, so the caller stops what it
+   * was doing. The epoch is written BEFORE the wipe: if the reload raced the
+   * write the device would wipe on every boot, for ever.
+   *
+   * A device that has never recorded an epoch but is holding state predates
+   * this check, and its state cannot be trusted to match the server — that is
+   * exactly the situation this was built for, so it resets once. Anything it
+   * had queued offline and never synced goes with it; the alternative is
+   * leaving stale figures on the floor, which is worse.
+   */
+  async function enforceEpoch() {
+    if (!sb || !global.localStorage) return false;
+    var ls = global.localStorage;
+    try {
+      var r = await sb.from('data_epoch').select('epoch').eq('id', 1).maybeSingle();
+      // No table, no permission, no row: nothing to enforce. Never let this
+      // check be the reason a factory cannot load its data.
+      if (r.error || !r.data || !r.data.epoch) return false;
+
+      var server = String(r.data.epoch);
+      var seen = ls.getItem(EPOCH_KEY);
+      if (seen === server) return false;
+
+      var hadState = !!ls.getItem('frp_factory_v5');
+      ls.setItem(EPOCH_KEY, server);
+      if (!seen && !hadState) return false;   // fresh device: nothing to drop
+
+      console.warn('[FactoryDB] data cleared on the server — dropping this ' +
+                   'device\'s cache and reloading');
+      // The marker, BEFORE the deletes, and it is the part that matters.
+      // location.reload() does not stop this script: pullFromFirebase() writes
+      // S back to the state key on its very next line, which would re-create
+      // the cache these deletes just removed — and with the new epoch already
+      // recorded, the device would never reset again. loadState() honours the
+      // marker on the next boot regardless of what got written in between.
+      try { ls.setItem('_reset_pending', '1'); } catch (e) {}
+      CACHE_KEYS.forEach(function (k) { try { ls.removeItem(k); } catch (e) {} });
+      if (global.location && typeof global.location.reload === 'function') {
+        global.location.reload();
+      }
+      return true;
+    } catch (e) {
+      console.warn('[FactoryDB] epoch check skipped:', e && e.message);
+      return false;
+    }
+  }
+
   // Kept in the same order as the Promise.all in pull(), so a failed query can
   // be named in the log instead of vanishing into a `|| []`.
   var TABLES = ['workers', 'rm_catalogue', 'fg_catalogue', 'attendance',
@@ -413,6 +484,10 @@
   // ── PULL ────────────────────────────────────────────────────────
   async function pull(S) {
     if (!ready) return S;
+    // Before reading anything: if the owner has cleared data since this device
+    // last looked, the device drops its cache and reloads. Checked here rather
+    // than at boot so it also catches a device that was already open.
+    if (await enforceEpoch()) return S;
     lastPullOk = false;
     lastPullDate = null;
     var workDate = S.workDate || new Date().toISOString().slice(0, 10);
@@ -1094,6 +1169,7 @@
     startSync: startSync,
     stopSync: stopSync,
     flushOutbox: flushOutbox,
+    enforceEpoch: enforceEpoch,
     pendingWrites: function () { return outbox().length; },
     lastPullOk: function () { return lastPullOk; },
     lastPullDate: function () { return lastPullDate; },
