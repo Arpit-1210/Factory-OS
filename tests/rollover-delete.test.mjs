@@ -35,6 +35,8 @@ function fakeSupabase({ tables = {} } = {}) {
       select() { return q; },
       eq(col, val) { q._filters.push([col, val]); return q; },
       order() { return q; },
+      range(from, to) { return q.then(r => (r && !r.error) ? { ...r, data: (r.data || []).slice(from, to + 1) } : r); },
+      limit() { return q; },
       single: () => Promise.resolve({ data: null, error: { message: 'none' } }),
       maybeSingle: () => Promise.resolve({ data: null, error: null }),
       delete() { q._delete = true; return q; },

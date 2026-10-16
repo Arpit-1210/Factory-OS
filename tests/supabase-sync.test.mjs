@@ -31,6 +31,13 @@ function fakeSupabase({ tables = {}, failOn = [], user = null, role = 'owner' } 
         return Promise.resolve({ data: row || null, error: null });
       },
       not() { return q; },
+      // Paged reads: .range(from, to) is inclusive, like PostgREST's.
+      range(from, to) {
+        const rows = (tables[table] || []).filter(r => q._filters.every(([c, v]) => r[c] === v));
+        q._paged = true;
+        return Promise.resolve({ data: rows.slice(from, to + 1), error: null });
+      },
+      limit() { return q; },
       update() { return q; },
       delete() { return q; },
       then(res) {           // awaiting the builder runs the select
@@ -353,10 +360,10 @@ describe('FactoryDB.pull — first-run guard', () => {
     const S = localData();
     await DB.pull(S);
 
-    assert.deepEqual(S.lab.map(l => l.name), ['Karan']);
+    sameShape(S.lab.map(l => l.name), ['Karan']);
     assert.equal(S.lab[0].isSup, true);
-    assert.deepEqual(S.rm.map(r => r.name), ['Gelcoat']);
-    assert.deepEqual(S.fg.map(f => f.name), ['Table B']);
+    sameShape(S.rm.map(r => r.name), ['Gelcoat']);
+    sameShape(S.fg.map(f => f.name), ['Table B']);
   });
 
   test('merges attendance onto the worker roster for the work date', async () => {

@@ -18,7 +18,7 @@
 
 import { baseProductName, calcOT, fgVariantBreakdown, getFGBalance, prodStage, sessionMembers, sessionProduction, sessionTeams } from '../core/calc.js';
 import { SPC, STAGES } from '../core/config.js';
-import { fmt, fmtN, spBadge, todayStr } from '../core/format.js';
+import { fmt, fmtN, spBadge, todayStr, esc } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { openAssignModal } from '../components/assign-modal.js';
 import { persist } from '../core/sync.js';
@@ -56,13 +56,13 @@ function productOptions(stage, q){
     }));
     if(waiting.length){
       variants = `<optgroup label="In ${prev} now">` +
-        waiting.map(v=>`<option value="${v.name}" data-price="${v.price}">${v.name} — ${fmt(v.price)} · ${v.qty} waiting</option>`).join('') +
+        waiting.map(v=>`<option value="${esc(v.name)}" data-price="${v.price}">${esc(v.name)} — ${fmt(v.price)} · ${v.qty} waiting</option>`).join('') +
         '</optgroup>';
     }
   }
 
   const catalogue = S.fg.filter(f=>match(f.name))
-    .map(f=>`<option value="${f.id}" data-price="${f.price}">[#${f.id}] ${f.name} — ${fmt(f.price)}</option>`).join('');
+    .map(f=>`<option value="${f.id}" data-price="${f.price}">[#${f.id}] ${esc(f.name)} — ${fmt(f.price)}</option>`).join('');
 
   return '<option value="">— select product —</option>' + variants +
          (variants ? '<optgroup label="Catalogue">'+catalogue+'</optgroup>' : catalogue);
@@ -95,8 +95,8 @@ export function renderSupLogin(){
         <div class="ch"><div class="ct">📋 Orders to Produce (${activeOrds.length})</div></div>
         ${activeOrds.map(o=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:6px">
           <div>
-            <div style="font-weight:600;font-size:13px">${o.customer} <span style="font-family:var(--mono);font-size:9px;color:var(--text4)">${o.id}</span></div>
-            <div style="font-size:12px;color:var(--text3)">${o.items||'—'} ${o.requiredBy?' · Due: '+new Date(o.requiredBy+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}):''}</div>
+            <div style="font-weight:600;font-size:13px">${esc(o.customer)} <span style="font-family:var(--mono);font-size:9px;color:var(--text4)">${esc(o.id)}</span></div>
+            <div style="font-size:12px;color:var(--text3)">${esc(o.items||'—')} ${o.requiredBy?' · Due: '+new Date(o.requiredBy+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}):''}</div>
           </div>
           <span style="font-size:10px;padding:2px 10px;border-radius:20px;font-family:var(--mono);font-weight:600;background:${o.status==='production'?'var(--blue-l)':'var(--amber-l)'};color:${o.status==='production'?'#1E40AF':'#92400E'}">${o.status==='production'?'IN PRODUCTION':'PENDING'}</span>
         </div>`).join('')}
@@ -132,7 +132,7 @@ export function renderSupLogin(){
     document.getElementById('sup-sess-list').innerHTML='';
     return;
   }
-  g.innerHTML=sups.map(s=>{const h=!!S.sessions.find(ss=>ss.supId===s.id);return`<div class="sc ${h?'has-s':''}" data-click="enterSup" data-args="[${s.id}]"><div class="sc-ic">👷</div><div class="sc-nm">${s.name}</div><div class="sc-rl">${s.role} · ${fmt(s.wage)}/day</div><div class="sc-st" style="color:${h?'var(--jade)':'var(--fog)'}">${h?'✓ Session active':'Tap to start'}</div></div>`;}).join('');
+  g.innerHTML=sups.map(s=>{const h=!!S.sessions.find(ss=>ss.supId===s.id);return`<div class="sc ${h?'has-s':''}" data-click="enterSup" data-args="[${s.id}]"><div class="sc-ic">👷</div><div class="sc-nm">${esc(s.name)}</div><div class="sc-rl">${esc(s.role)} · ${fmt(s.wage)}/day</div><div class="sc-st" style="color:${h?'var(--jade)':'var(--fog)'}">${h?'✓ Session active':'Tap to start'}</div></div>`;}).join('');
   const sl=document.getElementById('sup-sess-list');
   if(!S.sessions.length){sl.innerHTML='<div style="color:#6B7280;font-size:12px">No active sessions yet.</div>';return;}
   sl.innerHTML=S.sessions.map(ss=>{
@@ -142,7 +142,7 @@ export function renderSupLogin(){
     const lc      = members.reduce((a,m)=>a+(m.wage||0),0)+(ss.supWage||0);
     const gv      = prod.reduce((a,p)=>a+(p.value||0),0);
     const stages  = [...new Set(teams.map(t=>t.stage).filter(Boolean))];
-    return`<div class="tp"><div class="tph"><div><span class="tpn">${ss.supName}</span>&nbsp;${stages.map(spBadge).join(' ')}</div><div style="display:flex;gap:6px;align-items:center"><span style="font-family:var(--mono);font-size:10px;color:var(--dust)">${members.length} workers · ${fmt(lc)}/day</span><button class="btn btn-ember btn-xs" data-click="delSess" data-args="[${ss.supId}]">✕</button></div></div><div style="font-size:11px;color:var(--dust)">Team: ${members.map(m=>m.name).join(', ')||'—'}</div>${prod.length?`<div style="font-size:11px;color:var(--jade);margin-top:4px;font-family:var(--mono)">Produced: ${prod.map(p=>`${p.qty}× ${p.name}`).join(' | ')} = ${fmt(gv)}</div>`:'<div style="font-size:11px;color:var(--fog);margin-top:4px">No production logged yet</div>'}</div>`;}).join('');
+    return`<div class="tp"><div class="tph"><div><span class="tpn">${esc(ss.supName)}</span>&nbsp;${stages.map(spBadge).join(' ')}</div><div style="display:flex;gap:6px;align-items:center"><span style="font-family:var(--mono);font-size:10px;color:var(--dust)">${members.length} workers · ${fmt(lc)}/day</span><button class="btn btn-ember btn-xs" data-click="delSess" data-args="[${ss.supId}]">✕</button></div></div><div style="font-size:11px;color:var(--dust)">Team: ${members.map(m=>esc(m.name)).join(', ')||'—'}</div>${prod.length?`<div style="font-size:11px;color:var(--jade);margin-top:4px;font-family:var(--mono)">Produced: ${prod.map(p=>`${p.qty}× ${esc(p.name)}`).join(' | ')} = ${fmt(gv)}</div>`:'<div style="font-size:11px;color:var(--fog);margin-top:4px">No production logged yet</div>'}</div>`;}).join('');
 }
 export function delSess(id){
   if(!confirm('Remove this supervisor session?')) return;
@@ -221,9 +221,9 @@ export function renderSupTeamOverview(sess){
           <div>
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
               <span style="font-family:var(--display);font-size:15px;font-weight:700;color:#111827">Team ${t.teamId}</span>
-              <span class="sp ${SPC[STAGES.indexOf(t.stage)]}">${t.stage}</span>
+              <span class="sp ${SPC[STAGES.indexOf(t.stage)]}">${esc(t.stage)}</span>
             </div>
-            <div style="font-size:12px;color:#6B7280">${t.team.length} workers: ${t.team.map(m=>m.name).join(', ')||'No workers yet'}</div>
+            <div style="font-size:12px;color:#6B7280">${t.team.length} workers: ${t.team.map(m=>esc(m.name)).join(', ')||'No workers yet'}</div>
           </div>
           <div style="text-align:right">
             <div style="font-family:var(--mono);font-size:16px;font-weight:700;color:#065F46">${fmt(gv)}</div>
@@ -302,17 +302,17 @@ export function renderSupTeamWork(sess, team){
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
       <button class="btn btn-sm" data-click="clearTeamSelection">← All Teams</button>
       <span style="font-family:var(--display);font-size:14px;font-weight:700;color:#111827">Team ${team.teamId}</span>
-      <span class="sp ${SPC[STAGES.indexOf(team.stage)]}">${team.stage}</span>
+      <span class="sp ${SPC[STAGES.indexOf(team.stage)]}">${esc(team.stage)}</span>
     </div>
     ${team.team.length?`<div style="display:flex;flex-wrap:wrap;gap:6px">${team.team.map(m=>`
       <div class="wc inteam" data-click="swTogTeam" data-args="[${m.id}]" style="cursor:pointer">
-        <div><div class="wn">${m.name}</div><div class="ws">${fmt(m.wage)}/day${m.doingOT?' ⏰':''}</div></div>
+        <div><div class="wn">${esc(m.name)}</div><div class="ws">${fmt(m.wage)}/day${m.doingOT?' ⏰':''}</div></div>
         <div style="color:#EF4444;font-size:13px">−</div>
       </div>`).join('')}</div>`:'<div style="font-size:12px;color:#9CA3AF">Tap workers below to add to Team '+team.teamId+'.</div>'}`;
 
   document.getElementById('sw-pool').innerHTML=pool.length
     ?pool.map(l=>`<div class="wc ${myTeam.has(l.id)?'inteam':'present'}" data-click="swTogTeam" data-args="[${l.id}]">
-      <div><div class="wn">${l.name}</div><div class="ws">${l.role} · ${fmt(l.wage)}${l.doingOT?' ⏰':''}</div></div>
+      <div><div class="wn">${esc(l.name)}</div><div class="ws">${esc(l.role)} · ${fmt(l.wage)}${l.doingOT?' ⏰':''}</div></div>
       <div style="font-size:13px">${myTeam.has(l.id)?'−':'+'}</div>
     </div>`).join('')
     :'<div style="font-size:12px;color:#9CA3AF">No available workers.</div>';
@@ -354,7 +354,7 @@ export function renderSupTeamWork(sess, team){
   <tbody>${team.production.map((p,i)=>{const wt=p.weightPerPc||0;const tw=p.totalWeight||0;const rpkg=wt>0?Math.round(p.unitVal/wt):0;
     const rowStage=prodStage(p,team);
     const elsewhere=rowStage!==team.stage?` <span class="sp ${SPC[STAGES.indexOf(rowStage)]}" style="font-size:9px">${rowStage}</span>`:'';
-    return`<tr><td style="font-weight:500;color:#111827">${p.name}${elsewhere}</td><td class="num">${p.qty}</td><td class="num">${wt||'—'}</td><td class="num">${tw?fmtN(tw)+' kg':'—'}</td><td class="num" style="color:#B45309">${rpkg?fmt(rpkg):'—'}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(p.value)}</td><td><button class="btn btn-ember btn-xs" data-click="delProd" data-args="[${i}]">✕</button></td></tr>`;}).join('')}
+    return`<tr><td style="font-weight:500;color:#111827">${esc(p.name)}${elsewhere}</td><td class="num">${p.qty}</td><td class="num">${wt||'—'}</td><td class="num">${tw?fmtN(tw)+' kg':'—'}</td><td class="num" style="color:#B45309">${rpkg?fmt(rpkg):'—'}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(p.value)}</td><td><button class="btn btn-ember btn-xs" data-click="delProd" data-args="[${i}]">✕</button></td></tr>`;}).join('')}
   </tbody></table>
   <div style="display:flex;justify-content:flex-end;gap:16px;font-family:var(--mono);font-size:11px;margin-top:9px;padding-top:9px;border-top:1px solid #F3F4F6">
     <span>Goods: <span style="color:#065F46">${fmt(tv)}</span></span>

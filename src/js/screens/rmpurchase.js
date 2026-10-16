@@ -17,7 +17,7 @@
 // ==================================================================
 
 import { getRMBalance } from '../core/calc.js';
-import { fmt, todayStr } from '../core/format.js';
+import { fmt, todayStr, esc } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
 import { renderStock } from './stock.js';
@@ -25,9 +25,9 @@ import { renderStock } from './stock.js';
 export function openRMPurchaseForm(){
   if(!S.purchases) S.purchases=[];
   const sel=document.getElementById('rmp-mat');
-  if(sel) sel.innerHTML=S.rm.map(r=>`<option value="${r.id}" data-unit="${r.unit}">${r.name} (${r.unit})</option>`).join('');
+  if(sel) sel.innerHTML=S.rm.map(r=>`<option value="${r.id}" data-unit="${esc(r.unit)}">${esc(r.name)} (${esc(r.unit)})</option>`).join('');
   const fil=document.getElementById('rmp-filter');
-  if(fil) fil.innerHTML='<option value="all">All Materials</option>'+S.rm.map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
+  if(fil) fil.innerHTML='<option value="all">All Materials</option>'+S.rm.map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('');
   document.getElementById('rmp-date').value=S.workDate||todayStr();
   // Pre-fill reorder from stock
   const firstRM=S.rm[0];
@@ -89,7 +89,7 @@ export function renderRMPurchase(){
   const fil=document.getElementById('rmp-filter');
   if(fil){
     const cur=fil.value;
-    fil.innerHTML='<option value="all">All Materials</option>'+S.rm.map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
+    fil.innerHTML='<option value="all">All Materials</option>'+S.rm.map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('');
     fil.value=cur;
   }
   const filterMat=fil?fil.value:'all';
@@ -120,13 +120,13 @@ export function renderRMPurchase(){
     ${Object.values(matSummary).map(m=>{
       const crit=m.reorder>0&&m.balance<=m.reorder;
       return`<tr class="${crit?'tr-l':''}">
-        <td style="font-weight:500;color:#111827">${m.name}</td>
+        <td style="font-weight:500;color:#111827">${esc(m.name)}</td>
         <td class="num">${m.opening}</td>
         <td class="num" style="color:#065F46">${m.purchased>0?'+'+m.purchased:'—'}</td>
         <td class="num" style="color:#1E40AF">${m.adjustments!==0?m.adjustments:'—'}</td>
         <td class="num" style="color:#B91C1C">${m.used>0?'-'+m.used:'—'}</td>
-        <td class="num" style="font-weight:700;color:${crit?'#B91C1C':'#065F46'}">${m.balance.toFixed(1)} ${m.unit}</td>
-        <td style="color:#9CA3AF">${m.unit}</td>
+        <td class="num" style="font-weight:700;color:${crit?'#B91C1C':'#065F46'}">${m.balance.toFixed(1)} ${esc(m.unit)}</td>
+        <td style="color:#9CA3AF">${esc(m.unit)}</td>
         <td><span style="font-size:10px;padding:2px 8px;border-radius:20px;font-family:var(--mono);font-weight:600;background:${crit?'#FEF2F2':'#ECFDF5'};color:${crit?'#B91C1C':'#065F46'};border:1px solid ${crit?'#FECACA':'#A7F3D0'}">${crit?'LOW':'OK'}</span></td>
       </tr>`;
     }).join('')}
@@ -144,10 +144,10 @@ export function renderRMPurchase(){
     ${sorted.map(p=>`<tr>
       <td style="font-family:var(--mono);font-size:11px;color:#6B7280">${p.date}</td>
       <td><span style="font-size:10px;padding:2px 8px;border-radius:20px;font-family:var(--mono);font-weight:600;background:${typeBg[p.type]||'#F9FAFB'};color:${typeColor[p.type]||'#374151'}">${p.type.toUpperCase()}</span></td>
-      <td style="font-weight:500;color:#111827">${p.name}</td>
-      <td class="num" style="font-weight:600;color:${p.qty>=0?'#065F46':'#B91C1C'}">${p.qty>=0?'+':''}${p.qty} ${p.unit}</td>
+      <td style="font-weight:500;color:#111827">${esc(p.name)}</td>
+      <td class="num" style="font-weight:600;color:${p.qty>=0?'#065F46':'#B91C1C'}">${p.qty>=0?'+':''}${p.qty} ${esc(p.unit)}</td>
       <td class="num">${p.cost?fmt(p.cost):'—'}</td>
-      <td style="font-size:11px;color:#6B7280">${p.note||'—'}</td>
+      <td style="font-size:11px;color:#6B7280">${esc(p.note||'—')}</td>
     </tr>`).join('')}
     </tbody></table>`
   :'<div style="color:#9CA3AF;font-size:12px">No entries yet. Click + Add Purchase / Opening Stock to start.</div>';

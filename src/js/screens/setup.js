@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { fmtN } from '../core/format.js';
+import { fmtN, esc } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
 import { downloadXLSX } from '../core/xlsx.js';
@@ -29,8 +29,8 @@ export function dlSampleRM(){const ws=XLSX.utils.aoa_to_sheet([['Material Name',
 export function dlSampleLab(){const ws=XLSX.utils.aoa_to_sheet([['Name','Role','Daily Wage (Rs)','Supervisor? (Yes/No)'],['Ramesh Kumar','Floor worker',600,'No'],['Karan Patel','Supervisor',900,'Yes']]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sheet1');downloadXLSX(wb,'sample_labour.xlsx');}
 export function renderSetup(){
   const q=(document.getElementById('fg-search')?.value||'').toLowerCase();
-  document.getElementById('tb-rm').innerHTML=S.rm.map((r,i)=>`<tr><td style="color:var(--fog)">${i+1}</td><td style="font-weight:500;color:#111827">${r.name}</td><td style="color:var(--dust)">${r.unit}</td><td class="num">${fmtN(r.price)}</td><td><button class="btn btn-ember btn-xs" data-click="delRM" data-args="[${r.id}]">✕</button></td></tr>`).join('');
-  document.getElementById('tb-fg').innerHTML=S.fg.filter(f=>!q||f.name.toLowerCase().includes(q)).map((f,i)=>`<tr><td style="color:var(--fog)">${i+1}</td><td style="font-weight:500;color:#111827">${f.name}</td><td class="num" style="color:var(--fog)">${f.id}</td><td class="num">${fmtN(f.price)}</td><td><button class="btn btn-ember btn-xs" data-click="delFG" data-args="[${f.id}]">✕</button></td></tr>`).join('');
+  document.getElementById('tb-rm').innerHTML=S.rm.map((r,i)=>`<tr><td style="color:var(--fog)">${i+1}</td><td style="font-weight:500;color:#111827">${esc(r.name)}</td><td style="color:var(--dust)">${esc(r.unit)}</td><td class="num">${fmtN(r.price)}</td><td><button class="btn btn-ember btn-xs" data-click="delRM" data-args="[${r.id}]">✕</button></td></tr>`).join('');
+  document.getElementById('tb-fg').innerHTML=S.fg.filter(f=>!q||f.name.toLowerCase().includes(q)).map((f,i)=>`<tr><td style="color:var(--fog)">${i+1}</td><td style="font-weight:500;color:#111827">${esc(f.name)}</td><td class="num" style="color:var(--fog)">${f.id}</td><td class="num">${fmtN(f.price)}</td><td><button class="btn btn-ember btn-xs" data-click="delFG" data-args="[${f.id}]">✕</button></td></tr>`).join('');
   // The SUP badge is a BUTTON now, not a static label.
   //
   // `isSup` decides who appears on the Start Production screen
@@ -42,7 +42,7 @@ export function renderSetup(){
   // no way to correct it in the app at all: `isSup` could only be set when a
   // worker was first added, so the only route was delete-and-re-add, which
   // takes that worker's attendance history with it.
-  document.getElementById('tb-lab').innerHTML=S.lab.map((l,i)=>`<tr><td style="color:var(--fog)">${i+1}</td><td style="font-weight:500;color:#111827">${l.name}</td><td style="color:var(--dust)">${l.role}</td><td class="num">${fmtN(l.wage)}</td><td class="num">${l.otHours?l.otHours+'h':'—'}</td><td><button class="btn btn-xs ${l.isSup?'btn-jade':''}" data-click="togLabSup" data-args="[${l.id}]" title="${l.isSup?'Supervisor — tap to remove':'Tap to make supervisor'}">${l.isSup?'SUP':'—'}</button></td><td><button class="btn btn-ember btn-xs" data-click="delLab" data-args="[${l.id}]">✕</button></td></tr>`).join('');
+  document.getElementById('tb-lab').innerHTML=S.lab.map((l,i)=>`<tr><td style="color:var(--fog)">${i+1}</td><td style="font-weight:500;color:#111827">${esc(l.name)}</td><td style="color:var(--dust)">${esc(l.role)}</td><td class="num">${fmtN(l.wage)}</td><td class="num">${l.otHours?l.otHours+'h':'—'}</td><td><button class="btn btn-xs ${l.isSup?'btn-jade':''}" data-click="togLabSup" data-args="[${l.id}]" title="${l.isSup?'Supervisor — tap to remove':'Tap to make supervisor'}">${l.isSup?'SUP':'—'}</button></td><td><button class="btn btn-ember btn-xs" data-click="delLab" data-args="[${l.id}]">✕</button></td></tr>`).join('');
 }
 export function addRM(){const n=document.getElementById('rm-n').value.trim();const u=document.getElementById('rm-u').value;const p=parseFloat(document.getElementById('rm-p').value)||0;if(!n||!p){alert('Enter name and price.');return;}S.rm.push({id:uid(),name:n,unit:u,price:p});document.getElementById('rm-n').value='';document.getElementById('rm-p').value='';persist();renderSetup();}
 export function delRM(id){S.rm=S.rm.filter(r=>r.id!==id);persist();renderSetup();}

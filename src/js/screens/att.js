@@ -17,7 +17,7 @@
 // ==================================================================
 
 import { calcOT } from '../core/calc.js';
-import { fmt, todayStr } from '../core/format.js';
+import { fmt, todayStr, esc } from '../core/format.js';
 import { S } from '../core/state.js';
 import { persist, pushAttendanceLive } from '../core/sync.js';
 
@@ -48,8 +48,8 @@ export function renderAtt(){
   document.getElementById('att-grid').innerHTML=S.lab.map(l=>`
     <div class="wc ${l.present?'present':'absent'}" data-click="togAtt" data-args="[${l.id}]">
       <div>
-        <div class="wn">${l.name}${l.isSup?' ⭐':''}</div>
-        <div class="ws">${l.role} · ₹${l.wage}/day</div>
+        <div class="wn">${esc(l.name)}${l.isSup?' ⭐':''}</div>
+        <div class="ws">${esc(l.role)} · ₹${l.wage}/day</div>
       </div>
       <div style="font-size:16px;font-weight:700;color:${l.present?'var(--jade)':'var(--ember)'}">${l.present?'✓':'✗'}</div>
     </div>`).join('');
@@ -78,8 +78,8 @@ export function renderOTTab(){
       const hrs = l.otHours||0;
       const otPay = calcOT(l);
       return`<tr style="${l.doingOT?'background:var(--amber-l)':''}">
-        <td style="font-weight:600">${l.name}${l.isSup?' ⭐':''}</td>
-        <td style="color:var(--text3);font-size:11px">${l.role}</td>
+        <td style="font-weight:600">${esc(l.name)}${l.isSup?' ⭐':''}</td>
+        <td style="color:var(--text3);font-size:11px">${esc(l.role)}</td>
         <td class="num">₹${l.wage}</td>
         <td class="num">
           <input type="number" value="${hrs}" min="0" max="12" step="0.5"

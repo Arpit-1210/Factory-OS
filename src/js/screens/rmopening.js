@@ -19,7 +19,7 @@
 // ==================================================================
 
 import { getRMBalance } from '../core/calc.js';
-import { fmtN, todayStr } from '../core/format.js';
+import { fmtN, todayStr, esc } from '../core/format.js';
 import { currentRole } from '../core/session.js';
 import { S } from '../core/state.js';
 import { persist } from '../core/sync.js';
@@ -146,7 +146,7 @@ export function renderRMOpeningStock(){
         ${locked ? 'disabled' : ''} data-input="onRMOpeningCell"
         style="width:110px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;
                font-size:12px;text-align:right;background:${locked ? 'var(--surface2)' : 'var(--surface)'}"></td>
-      <td style="color:var(--text4);font-size:11px">${unitFor(m)}</td>
+      <td style="color:var(--text4);font-size:11px">${esc(unitFor(m))}</td>
     </tr>`;
   }).join('')
     : `<tr><td colspan="3" style="color:var(--text4);font-size:12px">
@@ -255,7 +255,7 @@ export async function confirmRMOpeningStock(){
   if (asOf > todayStr()) { alert('The go-live date cannot be in the future.'); return false; }
 
   harvest();
-  const lines = Object.keys(draft).map(m => `${m}: ${fmtN(draft[m])} ${unitFor(m)}`);
+  const lines = Object.keys(draft).map(m => `${m}: ${fmtN(draft[m])} ${esc(unitFor(m))}`);
   const summary = lines.length
     ? lines.slice(0, 12).join('\n') + (lines.length > 12 ? `\n…and ${lines.length - 12} more` : '')
     : '(nothing — every material opens at zero)';

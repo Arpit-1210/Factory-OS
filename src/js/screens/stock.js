@@ -18,7 +18,7 @@
 
 import { closedDaysExcludingOpen, getRMBalance } from '../core/calc.js';
 import { renderRMOpeningNotice } from './rmopening.js';
-import { todayStr } from '../core/format.js';
+import { todayStr, esc } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
 
@@ -42,8 +42,8 @@ export function renderStock(){
   // Populate material selects
   const matSel=document.getElementById('stk-mat');
   const purSel=document.getElementById('pur-mat');
-  if(matSel) matSel.innerHTML=S.rm.map(r=>`<option value="${r.id}">${r.name} (${r.unit})</option>`).join('');
-  if(purSel) purSel.innerHTML=S.rm.map(r=>`<option value="${r.id}">${r.name} (${r.unit})</option>`).join('');
+  if(matSel) matSel.innerHTML=S.rm.map(r=>`<option value="${r.id}">${esc(r.name)} (${esc(r.unit)})</option>`).join('');
+  if(purSel) purSel.innerHTML=S.rm.map(r=>`<option value="${r.id}">${esc(r.name)} (${esc(r.unit)})</option>`).join('');
 
   // Alerts
   const critical=S.stock.filter(s=>{
@@ -53,7 +53,7 @@ export function renderStock(){
   document.getElementById('stock-alerts').innerHTML=critical.length
     ?critical.map(s=>{
         const bal=getBalance(s.name,s.unit);
-        return`<div class="wbox">🚨 <b>${s.name}</b> — only <b>${bal.toFixed(1)} ${s.unit}</b> remaining (reorder level: ${s.reorder} ${s.unit}). Please procure immediately.</div>`;
+        return`<div class="wbox">🚨 <b>${esc(s.name)}</b> — only <b>${bal.toFixed(1)} ${esc(s.unit)}</b> remaining (reorder level: ${s.reorder} ${esc(s.unit)}). Please procure immediately.</div>`;
       }).join('')
     :'<div class="gbox">✓ All raw materials are above reorder levels.</div>';
 
@@ -72,13 +72,13 @@ export function renderStock(){
         = getRMBalance(s.name);
       const crit=s.reorder>0&&bal<=s.reorder;
       return`<tr class="${crit?'tr-l':''}">
-        <td style="font-weight:500;color:#111827">${s.name}</td>
+        <td style="font-weight:500;color:#111827">${esc(s.name)}</td>
         <td class="num">${s.opening}</td>
         <td class="num" style="color:#065F46">${purchased>0?'+'+purchased:'—'}</td>
         <td class="num" style="color:#6B7280">${usedHistory>0?'-'+usedHistory:'—'}</td>
         <td class="num" style="color:#B91C1C">${usedToday>0?'-'+usedToday:'—'}</td>
         <td class="num" style="font-weight:700;font-size:14px;color:${crit?'#B91C1C':'#065F46'}">${bal.toFixed(1)}</td>
-        <td style="color:#6B7280">${s.unit}</td>
+        <td style="color:#6B7280">${esc(s.unit)}</td>
         <td class="num" style="color:#9CA3AF">${s.reorder}</td>
         <td><span style="font-size:10px;padding:2px 8px;border-radius:20px;font-family:var(--mono);font-weight:600;background:${crit?'#FEF2F2':'#ECFDF5'};color:${crit?'#B91C1C':'#065F46'};border:1px solid ${crit?'#FECACA':'#A7F3D0'}">${crit?'REORDER':'OK'}</span></td>
       </tr>`;
@@ -124,11 +124,11 @@ export function renderStock(){
     const sign=m.type==='issue'?'-':'+';
     return`<tr>
       <td style="font-family:var(--mono);font-size:11px;color:#6B7280">${m.date}</td>
-      <td><span style="font-size:10px;padding:2px 8px;border-radius:20px;font-family:var(--mono);font-weight:600;background:${bg};color:${color}">${m.type.toUpperCase()}</span></td>
-      <td style="font-weight:500;color:#111827">${m.name}</td>
-      <td class="num" style="font-weight:600;color:${color}">${sign}${m.qty} ${m.unit}</td>
-      <td style="color:#9CA3AF">${m.unit}</td>
-      <td style="font-size:11px;color:#6B7280">${m.note}${m.cost?` · ₹${m.cost}`:''}</td>
+      <td><span style="font-size:10px;padding:2px 8px;border-radius:20px;font-family:var(--mono);font-weight:600;background:${bg};color:${esc(color)}">${m.type.toUpperCase()}</span></td>
+      <td style="font-weight:500;color:#111827">${esc(m.name)}</td>
+      <td class="num" style="font-weight:600;color:${esc(color)}">${sign}${m.qty} ${esc(m.unit)}</td>
+      <td style="color:#9CA3AF">${esc(m.unit)}</td>
+      <td style="font-size:11px;color:#6B7280">${esc(m.note)}${m.cost?` · ₹${m.cost}`:''}</td>
     </tr>`;
   }).join('')}
   </tbody></table>
@@ -136,7 +136,7 @@ export function renderStock(){
 }
 export function openStockUpdate(){
   const sel=document.getElementById('stk-mat');
-  if(sel) sel.innerHTML=S.rm.map(r=>`<option value="${r.id}">${r.name} (${r.unit})</option>`).join('');
+  if(sel) sel.innerHTML=S.rm.map(r=>`<option value="${r.id}">${esc(r.name)} (${esc(r.unit)})</option>`).join('');
   document.getElementById('stock-form').style.display='block';
   const first=S.stock[0];
   if(first){
@@ -170,7 +170,7 @@ export function saveStock(){
 export function openPurchase(){
   if(!S.purchases) S.purchases=[];
   const sel=document.getElementById('pur-mat');
-  if(sel) sel.innerHTML=S.rm.map(r=>`<option value="${r.id}" data-unit="${r.unit}">${r.name} (${r.unit})</option>`).join('');
+  if(sel) sel.innerHTML=S.rm.map(r=>`<option value="${r.id}" data-unit="${esc(r.unit)}">${esc(r.name)} (${esc(r.unit)})</option>`).join('');
   document.getElementById('purchase-form').style.display='block';
   document.getElementById('purchase-form').scrollIntoView({behavior:'smooth'});
 }

@@ -29,7 +29,7 @@ const fakeSupabase = {
   createClient: () => ({
     from: () => {
       const q = {
-        select: () => q, eq: () => q, order: () => q,
+        select: () => q, eq: () => q, order: () => q, range: (a, b) => q.then(r => (r && !r.error) ? { ...r, data: (r.data || []).slice(a, b + 1) } : r), limit: () => q,
         single: () => Promise.resolve({ data: null, error: { message: 'none' } }),
         maybeSingle: () => Promise.resolve({ data: null, error: null }),
         not() { return this; }, update() { return this; }, delete() { return this; },

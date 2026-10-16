@@ -80,6 +80,8 @@ or the SQL editor.
 | `0003_fix_fg_stock_axis` | Un-swaps `fg_stock.product` / `fg_stock.stage` |
 | `0004_enable_realtime` | Publishes the watched tables and sets `replica identity full` |
 | `0005_repair_accounts_and_ledger_writes` | Repairs NULL token columns in `auth.users`, backfills missing `app_users` rows, lets a supervisor close their own day |
+| `0006`–`0015` | Later hardening: see the header comment of each file in `supabase/migrations/` |
+| `0016_transfer_detail_columns` | Adds `product_in`, `product_out`, `auto`, `colour`, `note`, `order_id` to `fg_transfers` so auto-transfers survive sync (no double-counted stock). Safe to run before or after deploying the app |
 
 ### Roles
 `owner`, `supervisor`, `rm` — stored in `app_users.role`. `ROLE_ACCESS` in

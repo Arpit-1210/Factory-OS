@@ -163,3 +163,50 @@ describe('computeSalaryMonth — advances and deductions', () => {
     assert.doesNotThrow(() => salary('2026-08'));
   });
 });
+
+describe('computeSalaryMonth — a wage change never rewrites a month already worked', () => {
+  test('each closed day is paid at the wage recorded on that day', () => {
+    const S = fixture();                       // Ramesh's wage today: 400
+    S.lab.find(l => l.id === 1).wage = 500;    // raised on the 10th
+    S.ledger = [
+      day('2026-08-01', [{ id: 1, present: true, wage: 400 }]),
+      day('2026-08-02', [{ id: 1, present: true, wage: 400 }]),
+      day('2026-08-20', [{ id: 1, present: true, wage: 500 }]),
+    ];
+    const r = salary('2026-08').rows.find(x => x.l.id === 1);
+    assert.equal(r.days, 3);
+    assert.equal(r.gross, 400 + 400 + 500, 'not 3 x the current 500');
+    assert.equal(r.rate, 433.33, 'the average actually paid, so rate x days still adds up');
+  });
+
+  test('overtime is paid at the wage of the day it was worked', () => {
+    const S = fixture();
+    S.lab.find(l => l.id === 1).wage = 800;    // today's wage is higher than it was
+    S.ledger = [day('2026-08-01', [{ id: 1, present: true, doingOT: true, otHours: 4, wage: 400 }])];
+    const r = salary('2026-08').rows.find(x => x.l.id === 1);
+    assert.equal(r.otAmt, 200);                // 400 / 8 x 4, not 800 / 8 x 4
+    assert.equal(r.gross, 600);
+  });
+
+  test('a closed day recorded before wages were stored falls back to the current wage', () => {
+    const S = fixture();
+    S.ledger = [day('2026-08-01', [{ id: 1, present: true }])];
+    assert.equal(salary('2026-08').rows.find(x => x.l.id === 1).gross, 400);
+  });
+
+  test('the open day is paid at the current wage', () => {
+    const S = fixture({ workDate: '2026-08-05' });
+    S.lab.find(l => l.id === 1).present = true;
+    S.ledger = [day('2026-08-01', [{ id: 1, present: true, wage: 300 }])];
+    const r = salary('2026-08').rows.find(x => x.l.id === 1);
+    assert.equal(r.gross, 300 + 400);
+  });
+
+  test('raising the wage afterwards leaves an already-computed past month unchanged', () => {
+    const S = fixture();
+    S.ledger = [day('2026-08-01', [{ id: 1, present: true, wage: 400 }])];
+    const before = salary('2026-08').totals.gross;
+    S.lab.find(l => l.id === 1).wage = 1000;
+    assert.equal(salary('2026-08').totals.gross, before);
+  });
+});

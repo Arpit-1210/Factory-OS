@@ -18,7 +18,7 @@
 
 import { calcOT, closedDaysExcludingOpen, getFGBalance, getRMBalance, isOverdue, prodStage } from '../core/calc.js';
 import { STAGES } from '../core/config.js';
-import { fmt, todayStr } from '../core/format.js';
+import { fmt, todayStr, esc } from '../core/format.js';
 import { currentRole } from '../core/session.js';
 import { S } from '../core/state.js';
 import { getAllFGProducts } from './fgstock.js';
@@ -152,11 +152,11 @@ export function renderDashboard(){
       const gv=t.production.reduce((a,p)=>a+p.value,0);
       return`<div class="tp">
         <div class="tph">
-          <div><span class="tpn">${t.supName}</span>&nbsp;<span class="sp sp${STAGES.indexOf(t.stage)}">${t.stage}</span></div>
+          <div><span class="tpn">${esc(t.supName)}</span>&nbsp;<span class="sp sp${STAGES.indexOf(t.stage)}">${esc(t.stage)}</span></div>
           <span style="font-family:var(--mono);font-size:11px;color:var(--jade);font-weight:700">${fmt(gv)}</span>
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:${t.production.length?'5px':'0'}">${t.team.map(m=>m.name).join(', ')||'No workers yet'}</div>
-        ${t.production.length?`<div style="font-size:10px;color:var(--jade);font-family:var(--mono)">${t.production.map(p=>p.qty+'× '+p.name).join(' | ')}</div>`:''}
+        <div style="font-size:11px;color:var(--text3);margin-bottom:${t.production.length?'5px':'0'}">${t.team.map(m=>esc(m.name)).join(', ')||'No workers yet'}</div>
+        ${t.production.length?`<div style="font-size:10px;color:var(--jade);font-family:var(--mono)">${t.production.map(p=>p.qty+'× '+esc(p.name)).join(' | ')}</div>`:''}
       </div>`;}).join('')
     : '<div style="color:var(--text4);font-size:12px;padding:8px 0">No active teams yet.</div>';
   })();
@@ -206,8 +206,8 @@ export function renderDashboard(){
     document.getElementById('dash-recent-orders').innerHTML=recent.length
       ?recent.map(o=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);gap:8px">
           <div style="min-width:0">
-            <div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${o.customer}${isOverdue(o)?' 🚨':''}</div>
-            <div style="font-size:10px;color:var(--text4);font-family:var(--mono)">${o.id} · ${o.status.toUpperCase()}</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(o.customer)}${isOverdue(o)?' 🚨':''}</div>
+            <div style="font-size:10px;color:var(--text4);font-family:var(--mono)">${esc(o.id)} · ${o.status.toUpperCase()}</div>
           </div>
           <div style="text-align:right;flex-shrink:0">
             <div style="font-size:12px;font-weight:700;color:var(--text);font-family:var(--mono)">${fmt(o.amount)}</div>
@@ -293,7 +293,7 @@ export function renderTaskBoard(){
     return`<div style="border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:10px;border-left:3px solid ${statusColor}">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px">
         <div>
-          <div style="font-weight:700;font-size:14px;color:var(--text)">${o.customer} <span style="font-family:var(--mono);font-size:9px;color:var(--text4)">${o.id}</span></div>
+          <div style="font-weight:700;font-size:14px;color:var(--text)">${esc(o.customer)} <span style="font-family:var(--mono);font-size:9px;color:var(--text4)">${esc(o.id)}</span></div>
           <div style="font-size:11px;color:${dueColor};margin-top:2px">📅 Due: ${dueLabel} ${daysLeft!==null?'('+( od?'OVERDUE':(daysLeft===0?'Today':daysLeft+' days left'))+')':''}</div>
         </div>
         <span style="font-size:10px;padding:2px 10px;border-radius:20px;background:${orderStatusBg(o.status)};color:${orderStatusColor(o.status)};font-family:var(--mono);font-weight:700">${o.status==='ready'?'✅ Ready':o.status==='production'?'🏗️ In Production':'⏳ Pending'}</span>
@@ -307,16 +307,16 @@ export function renderTaskBoard(){
         return`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;background:${done?'var(--jade-l)':'var(--surface2)'}">
           <span style="font-size:16px">${done?'✅':'⬜'}</span>
           <div style="flex:1;min-width:0">
-            <div style="font-size:12px;font-weight:${done?'600':'400'};color:${done?'var(--jade)':'var(--text)'}">${item.name}</div>
+            <div style="font-size:12px;font-weight:${done?'600':'400'};color:${done?'var(--jade)':'var(--text)'}">${esc(item.name)}</div>
             ${item.qty?`<div style="margin-top:3px;background:var(--border);border-radius:4px;height:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${done?'var(--jade)':'var(--amber)'}"></div></div>`:''}
           </div>
           <div style="font-family:var(--mono);font-size:11px;color:${done?'var(--jade)':'var(--text3)'}">${item.qty?`${made}/${needed}`:(made>0?made+' made':'—')}</div>
         </div>`;
-      }).join('')}</div>`:`<div style="font-size:12px;color:var(--text4)">${o.items||'No items'}</div>`}
+      }).join('')}</div>`:`<div style="font-size:12px;color:var(--text4)">${esc(o.items||'No items')}</div>`}
       <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-        ${o.status==='pending'?`<button class="btn btn-sm" style="background:var(--blue-l);color:var(--blue);border-color:var(--blue-b)" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;production&quot;]">→ Start Production</button>`:''}
-        ${o.status==='production'?`<button class="btn btn-sm" style="background:var(--jade-l);color:var(--jade);border-color:var(--jade-b)" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;ready&quot;]">→ Mark Ready</button>`:''}
-        ${o.status==='ready'?`<button class="btn btn-sm" style="background:var(--surface2);color:var(--text2);border-color:var(--border)" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;dispatched&quot;]">🚚 Dispatch</button>`:''}
+        ${o.status==='pending'?`<button class="btn btn-sm" style="background:var(--blue-l);color:var(--blue);border-color:var(--blue-b)" data-click="updateOrderStatus" data-args="[&quot;${esc(o.id)}&quot;,&quot;production&quot;]">→ Start Production</button>`:''}
+        ${o.status==='production'?`<button class="btn btn-sm" style="background:var(--jade-l);color:var(--jade);border-color:var(--jade-b)" data-click="updateOrderStatus" data-args="[&quot;${esc(o.id)}&quot;,&quot;ready&quot;]">→ Mark Ready</button>`:''}
+        ${o.status==='ready'?`<button class="btn btn-sm" style="background:var(--surface2);color:var(--text2);border-color:var(--border)" data-click="updateOrderStatus" data-args="[&quot;${esc(o.id)}&quot;,&quot;dispatched&quot;]">🚚 Dispatch</button>`:''}
       </div>
     </div>`;
   }).join('');

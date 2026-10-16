@@ -18,7 +18,7 @@
 
 import { calcOT, prodStage } from '../core/calc.js';
 import { STAGES } from '../core/config.js';
-import { fmt, fmtN } from '../core/format.js';
+import { fmt, fmtN, esc } from '../core/format.js';
 import { go } from '../core/router.js';
 import { addDays, nextOpenDate } from '../core/day-rollover.js';
 import { fbEnabled } from '../core/session.js';
@@ -46,7 +46,7 @@ export function renderDay(){
     if(!Object.keys(pm).length)return;
     const ns=STAGES[si+1];const mn={};
     if(ns)S.sessions.forEach(ss=>(ss.teams||[]).forEach(t=>t.production.forEach(p=>{if(prodStage(p,t)===ns)mn[p.name]=(mn[p.name]||0)+p.qty;})));
-    invHTML+=`<div style="margin-bottom:16px"><div style="margin-bottom:8px"><span class="sp sp${si}">${stage}</span></div><table class="tbl"><thead><tr><th>Product</th><th class="num">Produced</th><th class="num">Moved to ${ns||'Customer'}</th><th class="num">Remaining</th><th class="num">₹/unit</th><th class="num">Stock Value</th></tr></thead><tbody>${Object.values(pm).map(p=>{const mv=mn[p.name]||0;const rem=p.qty-mv;return`<tr><td style="font-weight:500">${p.name}</td><td class="num">${p.qty}</td><td class="num" style="color:${mv?'var(--amber)':'var(--text4)'}">${mv?'→'+mv:'—'}</td><td class="num">${rem}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(rem*p.unitVal)}</td></tr>`;}).join('')}</tbody></table></div>`;
+    invHTML+=`<div style="margin-bottom:16px"><div style="margin-bottom:8px"><span class="sp sp${si}">${esc(stage)}</span></div><table class="tbl"><thead><tr><th>Product</th><th class="num">Produced</th><th class="num">Moved to ${ns||'Customer'}</th><th class="num">Remaining</th><th class="num">₹/unit</th><th class="num">Stock Value</th></tr></thead><tbody>${Object.values(pm).map(p=>{const mv=mn[p.name]||0;const rem=p.qty-mv;return`<tr><td style="font-weight:500">${esc(p.name)}</td><td class="num">${p.qty}</td><td class="num" style="color:${mv?'var(--amber)':'var(--text4)'}">${mv?'→'+mv:'—'}</td><td class="num">${rem}</td><td class="num">${fmtN(p.unitVal)}</td><td class="num">${fmtN(rem*p.unitVal)}</td></tr>`;}).join('')}</tbody></table></div>`;
   });
   document.getElementById('day-inv').innerHTML=invHTML||'<div style="color:var(--text4);font-size:12px">No production logged today.</div>';
   let rows='';let gG=0,gL=0,gOT=0,gR=0;
@@ -60,7 +60,7 @@ export function renderDay(){
       const gv=t.production.reduce((a,p)=>a+p.value,0);
       const sRM=S.rawLog.filter(r=>r.stage===t.stage).reduce((a,r)=>a+r.cost,0)/Math.max(1,S.sessions.reduce((a,s2)=>a+(s2.teams||[]).filter(t2=>t2.stage===t.stage).length,0));
       const net2=gv-lc-otc-sRM;gG+=gv;gL+=lc;gOT+=otc;gR+=sRM;
-      rows+=`<tr><td style="font-weight:500">${ss.supName}</td><td><span class="sp sp${STAGES.indexOf(t.stage)}">${t.stage}</span></td><td style="font-size:11px;color:var(--text3)">${t.team.map(m=>m.name).join(', ')||'—'}</td><td class="num">${fmtN(gv)}</td><td class="num">${fmtN(lc)}</td><td class="num">${otc?fmtN(otc):'—'}</td><td class="num">${fmtN(sRM)}</td><td class="num ${net2>=0?'pv':'lv'}">${fmt(net2)}</td></tr>`;
+      rows+=`<tr><td style="font-weight:500">${esc(ss.supName)}</td><td><span class="sp sp${STAGES.indexOf(t.stage)}">${esc(t.stage)}</span></td><td style="font-size:11px;color:var(--text3)">${t.team.map(m=>esc(m.name)).join(', ')||'—'}</td><td class="num">${fmtN(gv)}</td><td class="num">${fmtN(lc)}</td><td class="num">${otc?fmtN(otc):'—'}</td><td class="num">${fmtN(sRM)}</td><td class="num ${net2>=0?'pv':'lv'}">${fmt(net2)}</td></tr>`;
     });
   });
   if(!S.sessions.length)rows=`<tr><td colspan="8" style="color:var(--text4);text-align:center;padding:20px">No sessions yet.</td></tr>`;
