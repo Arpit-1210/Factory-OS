@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { fmt, todayStr } from '../core/format.js';
+import { fmt, todayStr, esc } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
 import { orderStatusBg, orderStatusColor, updateOrderStatus } from './orders.js';
@@ -31,13 +31,13 @@ export function renderDispatch(){
       <div class="card" style="border-left:3px solid var(--jade);margin-bottom:10px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px">
           <div>
-            <div style="font-weight:700;font-size:14px">${o.customer} <span style="font-family:var(--mono);font-size:9px;color:var(--text4)">${o.id}</span></div>
-            <div style="font-size:12px;color:var(--text3);margin-top:3px">${o.items||'—'} · ${o.city||'—'}</div>
+            <div style="font-weight:700;font-size:14px">${esc(o.customer)} <span style="font-family:var(--mono);font-size:9px;color:var(--text4)">${esc(o.id)}</span></div>
+            <div style="font-size:12px;color:var(--text3);margin-top:3px">${esc(o.items||'—')} · ${esc(o.city||'—')}</div>
             <div style="font-size:11px;color:var(--text4);font-family:var(--mono);margin-top:2px">Balance: ${fmt(o.amount-o.advance)}</div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
             <span style="font-size:10px;padding:2px 10px;border-radius:20px;background:${orderStatusBg(o.status)};color:${orderStatusColor(o.status)};font-family:var(--mono);font-weight:700">${o.status.toUpperCase()}</span>
-            <button class="btn btn-sm btn-jade" data-click="doDispatch" data-args="[&quot;${o.id}&quot;]">🚚 Dispatch Now</button>
+            <button class="btn btn-sm btn-jade" data-click="doDispatch" data-args="[&quot;${esc(o.id)}&quot;]">🚚 Dispatch Now</button>
           </div>
         </div>
       </div>`).join('')
@@ -53,8 +53,8 @@ export function renderDispatch(){
       <tbody>${dispatched.map(d=>`<tr>
         <td style="font-family:var(--mono);font-size:11px">${d.date}</td>
         <td style="font-family:var(--mono);font-size:11px;color:var(--text4)">${d.orderId}</td>
-        <td style="font-weight:600">${d.customer}</td>
-        <td style="font-size:11px;color:var(--text3)">${d.items||'—'}</td>
+        <td style="font-weight:600">${esc(d.customer)}</td>
+        <td style="font-size:11px;color:var(--text3)">${esc(d.items||'—')}</td>
         <td class="num pv">${fmt(d.amount||0)}</td>
         <td><span style="font-family:var(--mono);font-size:10px;color:var(--text4)">${d.challan||'—'}</span></td>
       </tr>`).join('')}</tbody>

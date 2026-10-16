@@ -349,16 +349,34 @@ export function computeSalaryMonth(month){
   const presenceDays = {};
   const otDays = {};
   const otHoursTotal = {};
-  S.lab.forEach(l=>{ presenceDays[l.id]=0; otDays[l.id]=0; otHoursTotal[l.id]=0; });
+  // What each worker EARNED, summed day by day at the wage in force that day.
+  //
+  // Payroll used to multiply today's wage by the number of days worked, so
+  // changing a wage on Setup silently rewrote every earlier month — including
+  // months already paid. Each closed day's attendance entry carries the wage it
+  // was closed with; that is the rate that was true on the day. An entry from
+  // before wages were recorded has none, and falls back to the current wage.
+  const earned = {};     // basic pay: sum of each present day's wage
+  const otMoney = {};    // overtime: sum of (that day's wage / 8) x hours
+  const wageOnDay = (a, l) => {
+    const w = a && a.wage !== undefined && a.wage !== null && a.wage !== '' ? Number(a.wage) : NaN;
+    return Number.isFinite(w) ? w : ((l && Number(l.wage)) || 0);
+  };
+  const labById = {}; S.lab.forEach(l=>{ labById[l.id]=l; });
+  S.lab.forEach(l=>{ presenceDays[l.id]=0; otDays[l.id]=0; otHoursTotal[l.id]=0; earned[l.id]=0; otMoney[l.id]=0; });
 
   monthLedger.forEach(day=>{
     (day.attendance||[]).forEach(a=>{
+      const w = wageOnDay(a, labById[a.id]);
       if(a.present){
         presenceDays[a.id]=(presenceDays[a.id]||0)+1;
+        earned[a.id]=(earned[a.id]||0)+w;
       }
       if(a.doingOT){
+        const h = parseFloat(a.otHours)||0;
         otDays[a.id]=(otDays[a.id]||0)+1;
-        otHoursTotal[a.id]=(otHoursTotal[a.id]||0)+(parseFloat(a.otHours)||0);
+        otHoursTotal[a.id]=(otHoursTotal[a.id]||0)+h;
+        otMoney[a.id]=(otMoney[a.id]||0)+(w/8)*h;
       }
     });
   });
@@ -372,10 +390,13 @@ export function computeSalaryMonth(month){
     S.lab.forEach(l=>{
       if(l.present){
         presenceDays[l.id]=(presenceDays[l.id]||0)+1;
+        earned[l.id]=(earned[l.id]||0)+(Number(l.wage)||0);
       }
       if(l.doingOT){
+        const h = parseFloat(l.otHours)||0;
         otDays[l.id]=(otDays[l.id]||0)+1;
-        otHoursTotal[l.id]=(otHoursTotal[l.id]||0)+(parseFloat(l.otHours)||0);
+        otHoursTotal[l.id]=(otHoursTotal[l.id]||0)+h;
+        otMoney[l.id]=(otMoney[l.id]||0)+((Number(l.wage)||0)/8)*h;
       }
     });
   }
@@ -389,15 +410,19 @@ export function computeSalaryMonth(month){
     const days  = presenceDays[l.id]||0;
     const otDay = otDays[l.id]||0;
     const otHrs = otHoursTotal[l.id]||0;
-    // Same rate as calcOT(): daily wage / 8 per hour.
-    const otAmt = Math.round((l.wage/8)*otHrs);
-    const gross = l.wage*days + otAmt;
+    // Same rate as calcOT(): daily wage / 8 per hour, but at each day's own wage.
+    const otAmt = Math.round(otMoney[l.id]||0);
+    const basic = earned[l.id]||0;
+    const gross = basic + otAmt;
+    // The rate to show: the current wage if it never changed this month, else
+    // the average actually paid, so wage x days still matches the basic pay.
+    const rate  = days ? Math.round((basic/days)*100)/100 : l.wage;
     const adv   = (adj[l.id]?.advance)||0;
     const ded   = (adj[l.id]?.deduction)||0;
     const net   = gross - adv - ded;
     const note  = adj[l.id]?.note||'';
     totals.gross+=gross; totals.adv+=adv; totals.ded+=ded; totals.net+=net;
-    return{l,days,otDay,otHrs,otAmt,gross,adv,ded,net,note,i};
+    return{l,rate,days,otDay,otHrs,otAmt,gross,adv,ded,net,note,i};
   });
 
   return {rows, totals};

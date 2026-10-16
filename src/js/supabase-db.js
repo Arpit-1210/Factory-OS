@@ -482,6 +482,83 @@
   }
 
   // ── PULL ────────────────────────────────────────────────────────
+  // ── PAGED READS ──
+  // PostgREST caps every response at 1000 rows (Supabase default `max_rows`).
+  // A plain .select('*') therefore returns a silently truncated table once it
+  // grows past that: closed days are ordered oldest-first, so the NEWEST days
+  // would be the ones cut off, and every figure built on them would be wrong
+  // with no error anywhere. Read in 1000-row pages, in a stable order, until a
+  // short page says there is nothing more.
+  var PAGE = 1000;
+  async function selectAll(table, orderCols, filters) {
+    var out = [];
+    for (var from = 0; ; from += PAGE) {
+      var q = sb.from(table).select('*');
+      (filters || []).forEach(function (f) { q = q.eq(f[0], f[1]); });
+      (orderCols || []).forEach(function (c) { q = q.order(c); });
+      var r = await q.range(from, from + PAGE - 1);
+      if (r.error) return { data: null, error: r.error };
+      var rows = r.data || [];
+      out = out.concat(rows);
+      if (rows.length < PAGE) return { data: out, error: null };
+    }
+  }
+
+  // ── fg_transfers EXTRA COLUMNS (migration 0016) ──
+  // The app records more about a transfer than the original table could hold:
+  // whether it was the automatic one made by logging production, the paint
+  // colour, the product on each side, the note and the order. Without columns
+  // for them they were lost on the next pull, and an automatic transfer then
+  // counted as a manual one: the stage it moved INTO showed double the stock.
+  //
+  // The columns are only written once the database is known to have them, so
+  // deploying this build before running the migration cannot make a write fail
+  // (a missing column is a permanent error, which would drop the transfer).
+  var xferCols = null;
+  async function probeXferCols() {
+    if (xferCols !== null) return xferCols;
+    try {
+      var r = await sb.from('fg_transfers')
+        .select('product_in,product_out,auto,colour,note,order_id').limit(1);
+      if (r.error) {
+        if (r.error.code === '42703' || /column/i.test(r.error.message || '')) xferCols = false;
+        return xferCols === null ? false : xferCols;   // other errors: unknown, retry next pull
+      }
+      xferCols = true;
+    } catch (e) { return false; }
+    return xferCols;
+  }
+  function xferRowToState(r) {
+    var t = {
+      id: r.id, date: r.work_date, product: r.product, from: r.from_stage,
+      to: r.to_stage, qty: Number(r.qty) || 0,
+      loggedBy: r.logged_by || null
+    };
+    if (r.product_in)  t.productIn  = r.product_in;
+    if (r.product_out) t.productOut = r.product_out;
+    if (r.auto)        t.auto       = true;
+    if (r.colour)      t.colour     = r.colour;
+    if (r.note)        t.note       = r.note;
+    if (r.order_id)    t.orderId    = r.order_id;
+    return t;
+  }
+  function xferStateToRow(t, uid) {
+    var row = {
+      id: t.id, work_date: t.date || null, product: t.product,
+      from_stage: t.from, to_stage: t.to,
+      qty: Number(t.qty) || 0, logged_by: t.loggedBy || uid
+    };
+    if (xferCols === true) {
+      row.product_in  = t.productIn  || null;
+      row.product_out = t.productOut || null;
+      row.auto        = !!t.auto;
+      row.colour      = t.colour     || null;
+      row.note        = t.note       || null;
+      row.order_id    = t.orderId != null ? String(t.orderId) : null;
+    }
+    return row;
+  }
+
   async function pull(S) {
     if (!ready) return S;
     // Before reading anything: if the owner has cleared data since this device
@@ -493,24 +570,19 @@
     var workDate = S.workDate || new Date().toISOString().slice(0, 10);
 
     try {
+      await probeXferCols();
       var res = await Promise.all([
-        sb.from('workers').select('*').eq('active', true).order('name'),
-        sb.from('rm_catalogue').select('*').order('name'),
-        sb.from('fg_catalogue').select('*').order('name'),
-        sb.from('attendance').select('*').eq('work_date', workDate),
-        sb.from('production_sessions').select('*').eq('work_date', workDate),
-        sb.from('raw_log').select('*').eq('work_date', workDate),
-        // NOT filtered by work_date. FG stock is cumulative: getFGBalance()
-        // subtracts transfers from all-time production, so fetching only the
-        // open day's transfers made every past transfer-out disappear from
-        // the balance and stage stock inflated a little more each day.
-        sb.from('fg_transfers').select('*'),
-        sb.from('fg_stock').select('*'),
-        sb.from('day_ledger').select('*').order('work_date'),
+        selectAll('workers', ['id'], [['active', true]]),
+        selectAll('rm_catalogue', ['id']),
+        selectAll('fg_catalogue', ['id']),
+        selectAll('attendance', ['worker_id'], [['work_date', workDate]]),
+        selectAll('production_sessions', ['sup_id'], [['work_date', workDate]]),
+        selectAll('raw_log', ['id'], [['work_date', workDate]]),
+        selectAll('fg_transfers', ['id']),
+        selectAll('fg_stock', ['product', 'stage']),
+        selectAll('day_ledger', ['work_date']),
         sb.from('factory_doc').select('*'),
-        // Appended LAST on purpose: every res[N] below is positional, so a new
-        // read inserted mid-list would silently re-point all of them.
-        sb.from('rm_stock_opening').select('*')
+        selectAll('rm_stock_opening', ['material'])
       ]);
 
       // WHY THIS LOOP EXISTS
@@ -549,6 +621,8 @@
         return TABLES[i] + ': ' + r.error.message;
       }).filter(Boolean);
 
+      var byName = function (a, b) { return String(a.name).localeCompare(String(b.name)); };
+      [res[0], res[1], res[2]].forEach(function (r) { if (r.data) r.data.sort(byName); });
       var workers = res[0].data || [];
       var att     = {};
       (res[3].data || []).forEach(function (a) { att[a.worker_id] = a; });
@@ -634,13 +708,7 @@
         };
       });
 
-      if (!res[6].error) S.fgTransfers = (res[6].data || []).map(function (r) {
-        return {
-          id: r.id, date: r.work_date, product: r.product, from: r.from_stage,
-          to: r.to_stage, qty: Number(r.qty) || 0,
-          loggedBy: r.logged_by || null
-        };
-      });
+      if (!res[6].error) S.fgTransfers = (res[6].data || []).map(xferRowToState);
 
       if (!res[7].error) {
         S.fgStock   = rowsToFgStock(res[7].data);
@@ -887,11 +955,9 @@
       await write('raw_log', rawRows, { onConflict: 'id' });
 
       var xferRows = (S.fgTransfers || []).map(function (t) {
-        return {
-          id: t.id, work_date: t.date || workDate, product: t.product,
-          from_stage: t.from, to_stage: t.to,
-          qty: Number(t.qty) || 0, logged_by: t.loggedBy || uid
-        };
+        var row = xferStateToRow(t, uid);
+        row.work_date = t.date || workDate;
+        return row;
       });
       await write('fg_transfers', xferRows, { onConflict: 'id' });
 

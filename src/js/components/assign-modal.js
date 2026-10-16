@@ -17,7 +17,7 @@
 // ==================================================================
 
 import { baseProductName, getFGBalance, isOverdue } from '../core/calc.js';
-import { fmtN, todayStr } from '../core/format.js';
+import { fmtN, todayStr, esc } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
 import { renderFGStock } from '../screens/fgstock.js';
@@ -67,17 +67,17 @@ export function openAssignModal(product, available, source) {
           const overdue = isOverdue(o);
           return `<div class="tp" style="margin-bottom:8px">
             <div class="tph">
-              <div><span class="tpn">${o.customer || 'Order #' + o.id}</span>
+              <div><span class="tpn">${esc(o.customer || 'Order #' + o.id)}</span>
                 <span style="font-family:var(--mono);font-size:10px;color:${orderStatusColor(o.status)};
-                  background:${orderStatusBg(o.status)};padding:2px 6px;border-radius:4px;margin-left:6px">${o.status}</span>
+                  background:${orderStatusBg(o.status)};padding:2px 6px;border-radius:4px;margin-left:6px">${esc(o.status)}</span>
                 ${overdue ? '<span style="color:var(--ember);font-size:10px;margin-left:6px">OVERDUE</span>' : ''}
               </div>
             </div>
-            <div style="font-size:11px;color:var(--text4);margin-bottom:6px">${o.items || ''}${o.requiredBy ? ' · due ' + o.requiredBy : ''}</div>
+            <div style="font-size:11px;color:var(--text4);margin-bottom:6px">${esc(o.items || '')}${o.requiredBy ? ' · due ' + o.requiredBy : ''}</div>
             <div style="display:flex;gap:6px;align-items:center">
               <input type="number" min="1" max="${assignAvailable}" value="${Math.min(assignAvailable, 1)}"
-                id="asg-qty-${o.id}" style="width:90px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px">
-              <button class="btn btn-jade btn-sm" data-click="confirmAssign" data-args="[${o.id}]">Assign</button>
+                id="asg-qty-${esc(o.id)}" style="width:90px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+              <button class="btn btn-jade btn-sm" data-click="confirmAssign" data-args="[${esc(o.id)}]">Assign</button>
             </div>
           </div>`;
         }).join('')

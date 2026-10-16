@@ -25,7 +25,7 @@
 // ==================================================================
 
 import { APPS_SCRIPT_CODE } from '../core/config.js';
-import { argsAttr, fmt, fmtN, spBadge, todayStr } from '../core/format.js';
+import { argsAttr, fmt, fmtN, spBadge, todayStr, esc } from '../core/format.js';
 import { currentRole } from '../core/session.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
@@ -138,7 +138,7 @@ export function filterUTItems() {
   dd.innerHTML = matches.map(i =>
     `<div data-click="selectUTItem" ${argsAttr(i.name, i.unit)} ` +
     'style="padding:8px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border)">' +
-    `${i.name}${i.unit ? ` <span style="color:var(--text4)">(${i.unit})</span>` : ''}</div>`
+    `${esc(i.name)}${i.unit ? ` <span style="color:var(--text4)">(${esc(i.unit)})</span>` : ''}</div>`
   ).join('') + more;
 }
 
@@ -249,9 +249,9 @@ export function renderUnitTransfers() {
       <td style="font-family:var(--mono);font-size:11px">${t.direction || ''}</td>
       <td>${t.type === 'FG' ? spBadge(t.stage || 'Packing') : '<span class="sp sp0">RM</span>'}</td>
       <td style="font-weight:500;color:#111827">${t.item || ''}</td>
-      <td class="num">${fmtN(t.qty)} ${t.unit || ''}</td>
+      <td class="num">${fmtN(t.qty)} ${esc(t.unit || '')}</td>
       <td class="num">${t.value ? fmt(t.value) : '—'}</td>
-      <td style="font-size:11px;color:var(--text4)">${t.note || ''}</td>
+      <td style="font-size:11px;color:var(--text4)">${esc(t.note || '')}</td>
       <td><button class="btn btn-ember btn-xs" data-click="deleteUnitTransfer" data-args="[${t.id}]">&#10005;</button></td>
     </tr>`).join('')}</tbody></table>`;
 }

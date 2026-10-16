@@ -18,7 +18,7 @@
 
 import { baseProductName, fgVariantBreakdown, getFGBalance, getRMBalance } from '../core/calc.js';
 import { FG_STAGES } from '../core/config.js';
-import { fmt, fmtN, todayStr } from '../core/format.js';
+import { fmt, fmtN, todayStr, esc } from '../core/format.js';
 import { S } from '../core/state.js';
 import { getAllFGProducts, initFGStock } from './fgstock.js';
 
@@ -73,10 +73,10 @@ export function renderInventory(){
       const usedToday=S.rawLog.filter(rl=>rl.name===r.name).reduce((a,rl)=>a+rl.qty,0);
       return`<tr class="${r.reorder>0&&r.bal<=r.reorder?'tr-l':''}">
         <td style="color:var(--text4)">${i+1}</td>
-        <td style="font-weight:500;color:var(--text)">${r.name}</td>
+        <td style="font-weight:500;color:var(--text)">${esc(r.name)}</td>
         <td class="num" style="font-weight:700;font-size:14px;color:${r.reorder>0&&r.bal<=r.reorder?'var(--ember)':'var(--jade)'}">${r.bal.toFixed(1)}</td>
         <td class="num" style="color:${usedToday?'var(--ember)':'var(--text4)'}">${usedToday?'-'+usedToday:'—'}</td>
-        <td style="color:var(--text3)">${r.unit}</td>
+        <td style="color:var(--text3)">${esc(r.unit)}</td>
         <td class="num" style="color:var(--text4)">${r.reorder||'—'}</td>
         <td><span class="badge ${r.reorder>0&&r.bal<=r.reorder?'b-ember':'b-jade'}">${r.reorder>0&&r.bal<=r.reorder?'🚨 REORDER':'✓ OK'}</span></td>
       </tr>`;
@@ -109,7 +109,7 @@ export function renderInventory(){
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px">
           ${g.items.map(t=>`<span style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px">
-            <b style="color:var(--text)">${t.product}</b>
+            <b style="color:var(--text)">${esc(t.product)}</b>
             <span style="color:var(--ember);font-family:var(--mono);font-weight:700"> −${t.qty}</span>
             <span style="color:var(--text4)"> from ${t.from}</span>
             <span style="color:var(--jade);font-family:var(--mono);font-weight:700"> +${t.qty}</span>
@@ -218,7 +218,7 @@ export function renderInventory(){
 
   // Alerts
   const alerts=[];
-  rmItems.filter(r=>r.reorder>0&&r.bal<=r.reorder).forEach(r=>alerts.push(`<div class="alert-banner danger">🚨 <b>${r.name}</b> — ${r.bal.toFixed(1)} ${r.unit} left (reorder: ${r.reorder})</div>`));
+  rmItems.filter(r=>r.reorder>0&&r.bal<=r.reorder).forEach(r=>alerts.push(`<div class="alert-banner danger">🚨 <b>${esc(r.name)}</b> — ${r.bal.toFixed(1)} ${esc(r.unit)} left (reorder: ${r.reorder})</div>`));
   const packingGoods = allProds.filter(p=>getFGCumulative(p,'Packing')>0);
   if(packingGoods.length) alerts.push(`<div class="alert-banner ok">✅ <b>${packingGoods.length} product${packingGoods.length!==1?'s':''}</b> ready in Packing — ready to dispatch</div>`);
   document.getElementById('inv-alerts').innerHTML=alerts.join('');

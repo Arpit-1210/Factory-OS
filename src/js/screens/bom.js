@@ -17,7 +17,7 @@
 // ==================================================================
 
 import { S } from '../core/state.js';
-import { argsAttr } from '../core/format.js';
+import { argsAttr, esc } from '../core/format.js';
 import { persist } from '../core/sync.js';
 
 // ── screen state ──
@@ -34,8 +34,8 @@ export function renderBOM(){
     <tbody>${keys.map(prod=>{
       const mats = S.bom[prod]||[];
       return`<tr>
-        <td style="font-weight:600">${prod}</td>
-        <td style="font-size:11px;color:var(--text3)">${mats.map(m=>`${m.qty} ${m.unit} ${m.name}`).join(' + ')||'—'}</td>
+        <td style="font-weight:600">${esc(prod)}</td>
+        <td style="font-size:11px;color:var(--text3)">${mats.map(m=>`${m.qty} ${esc(m.unit)} ${esc(m.name)}`).join(' + ')||'—'}</td>
         <td><span class="badge b-jade">Auto ✓</span></td>
         <td style="display:flex;gap:6px">
           <button class="btn btn-sm btn-blue" data-click="editBOM" ${argsAttr(prod)}>✏️ Edit</button>
@@ -71,7 +71,7 @@ export function filterBOMProducts(){
   if(!q){dd.style.display='none';return;}
   const matches=S.fg.filter(p=>p.name.toLowerCase().includes(q)).slice(0,15);
   if(!matches.length){dd.style.display='none';return;}
-  dd.innerHTML=matches.map(p=>`<div data-click="selectBOMProd" ${argsAttr(p.name)} style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border)" class="dd-row">${p.name}</div>`).join('');
+  dd.innerHTML=matches.map(p=>`<div data-click="selectBOMProd" ${argsAttr(p.name)} style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border)" class="dd-row">${esc(p.name)}</div>`).join('');
   dd.style.display='block';
 }
 export function selectBOMProd(name){
@@ -87,10 +87,10 @@ export function renderBOMRMRows(){
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
       <select data-change="setBOMRowMaterial" data-args="[${i}]" style="flex:2;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--r);background:var(--surface2);color:var(--text);font-size:12px">
         <option value="">Select RM</option>
-        ${S.rm.map(m=>`<option value="${m.name}" ${r.name===m.name?'selected':''}>${m.name} (${m.unit})</option>`).join('')}
+        ${S.rm.map(m=>`<option value="${esc(m.name)}" ${r.name===m.name?'selected':''}>${esc(m.name)} (${esc(m.unit)})</option>`).join('')}
       </select>
       <input type="number" value="${r.qty}" min="0" step="0.01" placeholder="Qty" data-change="setBOMRowQty" data-args="[${i}]" style="width:80px;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--r);background:var(--surface2);color:var(--text);font-size:12px">
-      <span style="font-family:var(--mono);font-size:11px;color:var(--text4);min-width:30px">${r.unit||'kg'}</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text4);min-width:30px">${esc(r.unit||'kg')}</span>
       <button class="btn btn-sm btn-ember" data-click="removeBOMRow" data-args="[${i}]">✕</button>
     </div>`).join('');
 }

@@ -28,6 +28,8 @@ function fakeSupabase({ tables = {}, failOn = [], user = { id: 'u1' } } = {}) {
       eq(col, val) { q._filters.push([col, val]); return q; },
       not(col, op, val) { q._filters.push([col, op, val]); return q; },
       order() { return q; },
+      range(from, to) { return q.then(r => (r && !r.error) ? { ...r, data: (r.data || []).slice(from, to + 1) } : r); },
+      limit() { return q; },
       maybeSingle() {
         const row = (tables[table] || []).find(r => r.id === (user && user.id));
         return Promise.resolve({ data: row || null, error: null });

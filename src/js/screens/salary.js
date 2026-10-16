@@ -17,7 +17,7 @@
 // ==================================================================
 
 import { computeSalaryMonth, otAmt } from '../core/calc.js';
-import { fmt, fmtN, todayStr } from '../core/format.js';
+import { fmt, fmtN, todayStr, esc } from '../core/format.js';
 import { S } from '../core/state.js';
 import { sendGet } from '../core/sheets-sync.js';
 import { persist } from '../core/sync.js';
@@ -51,12 +51,12 @@ export function renderSalary(){
     <div class="met m-red"><div class="ml">Total Deductions</div><div class="mv r">${fmt(totalDed)}</div></div>
     <div class="met m-green"><div class="ml">Net Payable</div><div class="mv g" style="font-size:20px">${fmt(totalNet)}</div></div>`;
 
-  document.getElementById('sal-tbody').innerHTML = rows.map(({l,days,otHrs,otAmt,gross,adv,ded,net,i})=>`
+  document.getElementById('sal-tbody').innerHTML = rows.map(({l,rate,days,otHrs,otAmt,gross,adv,ded,net,i})=>`
     <tr>
       <td style="color:var(--text4);font-family:var(--mono)">${i+1}</td>
-      <td style="font-weight:600">${l.name}</td>
-      <td style="color:var(--text3);font-size:11px">${l.role}</td>
-      <td class="num">₹${fmtN(l.wage)}</td>
+      <td style="font-weight:600">${esc(l.name)}</td>
+      <td style="color:var(--text3);font-size:11px">${esc(l.role)}</td>
+      <td class="num">₹${fmtN(rate)}</td>
       <td class="num">${days}</td>
       <td class="num">${otHrs?otHrs+'h':'—'}</td>
       <td class="num">${otAmt?fmt(otAmt):'—'}</td>
@@ -109,7 +109,7 @@ export function exportSalaryExcel(){
 
   const aoa=[['#','Worker','Role','Daily Wage','Days Present','OT Days','OT Hours','OT Amount','Gross Pay','Advance','Deduction','Net Pay','Note']];
   rows.forEach(r=>aoa.push([
-    r.i+1, r.l.name, r.l.role, r.l.wage, r.days, r.otDay, r.otHrs,
+    r.i+1, r.l.name, r.l.role, r.rate, r.days, r.otDay, r.otHrs,
     r.otAmt, r.gross, r.adv, r.ded, r.net, r.note
   ]));
   const ws=XLSX.utils.aoa_to_sheet(aoa);
@@ -121,7 +121,7 @@ export function exportSalaryExcel(){
   if(S.sheetsUrl){
     const workers=rows.map(r=>({
       name:r.l.name, role:r.l.role, days:r.days, otDays:r.otDay,
-      wage:r.l.wage, gross:r.gross, advance:r.adv, deduction:r.ded, net:r.net
+      wage:r.rate, gross:r.gross, advance:r.adv, deduction:r.ded, net:r.net
     }));
     const payload={action:'monthlySalary',month,workers};
     sendGet(S.sheetsUrl,'action=monthlySalary&payload='+encodeURIComponent(JSON.stringify(payload)));

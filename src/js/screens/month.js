@@ -18,7 +18,7 @@
 
 import { prodStage } from '../core/calc.js';
 import { MNAMES, STAGES } from '../core/config.js';
-import { fmt, fmtN, spBadge } from '../core/format.js';
+import { fmt, fmtN, spBadge, esc } from '../core/format.js';
 import { S } from '../core/state.js';
 
 export function initMonthly(){
@@ -97,9 +97,9 @@ export function showMonthDay(dateStr){
     <div class="tw"><table class="tbl">
       <thead><tr><th>Supervisor</th><th>Stage</th><th>Product</th><th class="num">Qty</th><th class="num">Value ₹</th></tr></thead>
       <tbody>${prods.map(p=>`<tr>
-        <td style="font-size:12px">${p.supName||'—'}</td>
-        <td><span class="sp sp${STAGES.indexOf(p.stage)}">${p.stage}</span></td>
-        <td style="font-weight:500">${p.name}</td>
+        <td style="font-size:12px">${esc(p.supName||'—')}</td>
+        <td><span class="sp sp${STAGES.indexOf(p.stage)}">${esc(p.stage)}</span></td>
+        <td style="font-weight:500">${esc(p.name)}</td>
         <td class="num">${p.qty}</td>
         <td class="num pv">${fmtN(p.value||0)}</td>
       </tr>`).join('')}</tbody>
@@ -130,7 +130,7 @@ export function renderMonthly(){
   else{entries.forEach(e=>{const d=new Date(e.date+'T00:00:00');const g=num(e.goodsValue),l=num(e.labourCost),o=num(e.overtimeCost),r=num(e.rmCost),n=num(e.netProfit);const mg=g?Math.round(n/g*100):0;lr+=`<tr class="${n>0?'tr-p':n<0?'tr-l':''}"><td style="font-weight:500;color:#111827">${d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})}</td><td class="num">${num(e.workersPresent)}</td><td class="num">${fmtN(g)}</td><td class="num">${fmtN(l)}</td><td class="num">${fmtN(o)}</td><td class="num">${fmtN(r)}</td><td class="num ${n>=0?'pv':'lv'}">${fmt(n)}</td><td class="num ${mg>=0?'pv':'lv'}">${mg}%</td></tr>`;});lr+=`<tr class="tr-total"><td>TOTAL</td><td class="num">—</td><td class="num">${fmtN(tG)}</td><td class="num">${fmtN(tL)}</td><td class="num">${fmtN(tOT)}</td><td class="num">${fmtN(tR)}</td><td class="num ${tN>=0?'pv':'lv'}">${fmt(tN)}</td><td class="num ${tN>=0?'pv':'lv'}">${tG?Math.round(tN/tG*100):0}%</td></tr>`;}
   document.getElementById('m-ledger').innerHTML=lr;
   const pm={};entries.forEach(e=>(e.productLog||[]).forEach(p=>{if(!pm[p.name])pm[p.name]={name:p.name,qty:0,value:0};pm[p.name].qty+=num(p.qty);pm[p.name].value+=num(p.qty)*num(p.unitVal);}));const prods=Object.values(pm).sort((a,b)=>b.value-a.value);const maxV=prods[0]?.value||1;
-  document.getElementById('m-prods').innerHTML=prods.length?`<table class="tbl"><thead><tr><th>Product</th><th class="num">Units</th><th class="num">Value ₹</th><th style="width:80px">Share</th></tr></thead><tbody>${prods.map(p=>`<tr><td style="font-weight:500;color:#111827">${p.name}</td><td class="num">${p.qty}</td><td class="num">${fmtN(p.value)}</td><td><div class="prog"><div class="pf" style="width:${Math.round(p.value/maxV*100)}%"></div></div></td></tr>`).join('')}</tbody></table>`:'<div style="color:#6B7280;font-size:12px">No data.</div>';
+  document.getElementById('m-prods').innerHTML=prods.length?`<table class="tbl"><thead><tr><th>Product</th><th class="num">Units</th><th class="num">Value ₹</th><th style="width:80px">Share</th></tr></thead><tbody>${prods.map(p=>`<tr><td style="font-weight:500;color:#111827">${esc(p.name)}</td><td class="num">${p.qty}</td><td class="num">${fmtN(p.value)}</td><td><div class="prog"><div class="pf" style="width:${Math.round(p.value/maxV*100)}%"></div></div></td></tr>`).join('')}</tbody></table>`:'<div style="color:#6B7280;font-size:12px">No data.</div>';
   const stT={};STAGES.forEach(s=>stT[s]={g:0,l:0,ot:0,r:0});
   entries.forEach(e=>{
     // Goods ARE per team, so they accumulate inside the team walk.
@@ -156,7 +156,7 @@ export function renderMonthly(){
   });
   document.getElementById('m-stages').innerHTML=STAGES.map((s,si)=>{const t=stT[s];const n=t.g-t.l-t.ot-t.r;return`<tr><td><span class="sp sp${si}">${s}</span></td><td class="num">${fmtN(t.g)}</td><td class="num">${fmtN(t.l)}</td><td class="num">${fmtN(t.ot)}</td><td class="num">${fmtN(t.r)}</td><td class="num ${n>=0?'pv':'lv'}">${fmt(n)}</td></tr>`;}).join('');
   const supM={};entries.forEach(e=>(e.sessions||[]).forEach(ss=>{if(!supM[ss.supName])supM[ss.supName]={name:ss.supName,stages:new Set(),days:0,goods:0,lab:0};(ss.teams||[]).forEach(t=>{supM[ss.supName].stages.add(t.stage);supM[ss.supName].goods+=(t.production||[]).reduce((a,p)=>a+num(p.value),0);supM[ss.supName].lab+=(t.team||[]).reduce((a,m)=>a+num(m.wage),0);});supM[ss.supName].days++;supM[ss.supName].lab+=num(ss.supWage);}));
-  document.getElementById('m-sups').innerHTML=Object.values(supM).sort((a,b)=>b.goods-a.goods).map(s=>{const n=s.goods-s.lab;return`<tr><td style="font-weight:600">${s.name}</td><td>${[...s.stages].map(st=>spBadge(st)).join(' ')}</td><td class="num">${s.days}</td><td class="num">${fmtN(s.goods)}</td><td class="num">${fmtN(s.lab)}</td><td class="num ${n>=0?'pv':'lv'}">${fmt(n)}</td></tr>`;}).join('')||`<tr><td colspan="6" style="color:var(--text4);text-align:center">No supervisor data.</td></tr>`;
+  document.getElementById('m-sups').innerHTML=Object.values(supM).sort((a,b)=>b.goods-a.goods).map(s=>{const n=s.goods-s.lab;return`<tr><td style="font-weight:600">${esc(s.name)}</td><td>${[...s.stages].map(st=>spBadge(st)).join(' ')}</td><td class="num">${s.days}</td><td class="num">${fmtN(s.goods)}</td><td class="num">${fmtN(s.lab)}</td><td class="num ${n>=0?'pv':'lv'}">${fmt(n)}</td></tr>`;}).join('')||`<tr><td colspan="6" style="color:var(--text4);text-align:center">No supervisor data.</td></tr>`;
 }
 
 

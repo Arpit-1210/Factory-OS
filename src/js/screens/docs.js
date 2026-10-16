@@ -16,7 +16,7 @@
 //  build on any such name.
 // ==================================================================
 
-import { fmt, fmtN, todayStr } from '../core/format.js';
+import { fmt, fmtN, todayStr, esc } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { sendGet } from '../core/sheets-sync.js';
 import { persist } from '../core/sync.js';
@@ -38,7 +38,7 @@ export function saveDocAsOrder(){
   if(!docItems.length){ alert('Add at least one item first.'); return; }
 
   const total = docItems.reduce((a,i)=>a+(i.qty*(i.rate||0)),0) - discount;
-  const itemsStr = docItems.map(i=>`${i.name} x${i.qty}`).join(', ');
+  const itemsStr = docItems.map(i=>`${esc(i.name)} x${i.qty}`).join(', ');
 
   const order = {
     id: 'ORD-'+Date.now().toString().slice(-6),
@@ -79,12 +79,12 @@ export function renderDocs(){
   // Populate product dropdown
   const sel = document.getElementById('doc-item-prod');
   if(sel) sel.innerHTML = '<option value="">— select product —</option>' +
-    S.fg.map(f=>`<option value="${f.id}" data-price="${f.price}">[#${f.id}] ${f.name} — ${fmt(f.price)}</option>`).join('');
+    S.fg.map(f=>`<option value="${f.id}" data-price="${f.price}">[#${f.id}] ${esc(f.name)} — ${fmt(f.price)}</option>`).join('');
 
   // Populate order dropdown
   const osel = document.getElementById('doc-from-order');
   if(osel) osel.innerHTML = '<option value="">— select order —</option>' +
-    S.orders.map(o=>`<option value="${o.id}">${o.id} · ${o.customer} · ${o.city}</option>`).join('');
+    S.orders.map(o=>`<option value="${esc(o.id)}">${esc(o.id)} · ${esc(o.customer)} · ${esc(o.city)}</option>`).join('');
 
   // Set default date and number.
   // The document's issue date follows the day being worked: a quotation
@@ -156,7 +156,7 @@ export function renderDocItems(){
   el.innerHTML=`<table class="tbl" style="margin-bottom:10px"><thead><tr><th>#</th><th>Product</th><th class="num">Qty</th><th class="num">Rate ₹</th><th class="num">Total ₹</th><th></th></tr></thead><tbody>
   ${docItems.map((item,i)=>`<tr>
     <td style="color:var(--text4)">${i+1}</td>
-    <td style="font-weight:500;color:var(--text)">${item.name}</td>
+    <td style="font-weight:500;color:var(--text)">${esc(item.name)}</td>
     <td class="num">${item.qty}</td>
     <td class="num">${fmtN(item.rate)}</td>
     <td class="num" style="font-weight:600">${fmtN(item.total)}</td>
@@ -217,8 +217,8 @@ export function buildDocHTML(forPrint){
     <div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:14px 16px;margin-bottom:20px">
       <div style="font-size:10px;font-family:monospace;color:#9CA3AF;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">${type==='challan'?'Deliver To':'Bill To'}</div>
       <div style="font-size:15px;font-weight:700;color:#111827">${cust}</div>
-      ${phone?`<div style="font-size:12px;color:#6B7280;margin-top:3px">📞 ${phone}</div>`:''}
-      ${city||addr?`<div style="font-size:12px;color:#6B7280;margin-top:2px">📍 ${[addr,city].filter(Boolean).join(', ')}</div>`:''}
+      ${phone?`<div style="font-size:12px;color:#6B7280;margin-top:3px">📞 ${esc(phone)}</div>`:''}
+      ${city||addr?`<div style="font-size:12px;color:#6B7280;margin-top:2px">📍 ${[addr,city].filter(Boolean).map(esc).join(', ')}</div>`:''}
     </div>
 
     <!-- ITEMS TABLE -->
@@ -236,7 +236,7 @@ export function buildDocHTML(forPrint){
         ${docItems.length ? docItems.map((item,i)=>`
           <tr style="border-bottom:1px solid #F3F4F6;background:${i%2===0?'white':'#FAFAFA'}">
             <td style="padding:10px 12px;font-size:12px;color:#9CA3AF">${i+1}</td>
-            <td style="padding:10px 12px;font-size:13px;font-weight:500;color:#111827">${item.name}</td>
+            <td style="padding:10px 12px;font-size:13px;font-weight:500;color:#111827">${esc(item.name)}</td>
             <td style="padding:10px 12px;text-align:right;font-size:12px;font-family:monospace">${item.qty}</td>
             <td style="padding:10px 12px;text-align:right;font-size:12px;font-family:monospace">${item.rate.toLocaleString('en-IN')}</td>
             <td style="padding:10px 12px;text-align:right;font-size:13px;font-weight:600;font-family:monospace">${item.total.toLocaleString('en-IN')}</td>
@@ -274,7 +274,7 @@ export function buildDocHTML(forPrint){
     ${notes?`<!-- NOTES -->
     <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:12px 16px;margin-bottom:20px">
       <div style="font-size:10px;font-family:monospace;color:#92400E;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Terms & Notes</div>
-      <div style="font-size:12px;color:#78350F;line-height:1.6">${notes}</div>
+      <div style="font-size:12px;color:#78350F;line-height:1.6">${esc(notes)}</div>
     </div>`:''}
 
     <!-- FOOTER -->

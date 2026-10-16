@@ -34,7 +34,7 @@ function fakeSupabase({ session = null, role = null, active = true } = {}) {
     from: (table) => {
       const q = {
         _f: [],
-        select: () => q, eq: (c, v) => (q._f.push([c, v]), q), order: () => q,
+        select: () => q, eq: (c, v) => (q._f.push([c, v]), q), order: () => q, range: (a, b) => q.then(r => (r && !r.error) ? { ...r, data: (r.data || []).slice(a, b + 1) } : r), limit: () => q,
         single: () => Promise.resolve(
           table === 'app_users' && role
             ? { data: { id: 'u1', role, name: 'Karan', active }, error: null }

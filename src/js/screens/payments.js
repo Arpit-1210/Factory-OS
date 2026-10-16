@@ -17,7 +17,7 @@
 // ==================================================================
 
 import { isOverdue } from '../core/calc.js';
-import { fmt, fmtN } from '../core/format.js';
+import { fmt, fmtN, esc } from '../core/format.js';
 import { S } from '../core/state.js';
 import { orderStatusBg, orderStatusColor } from './orders.js';
 
@@ -44,15 +44,15 @@ export function renderPayments(){
   </tr></thead><tbody>${unpaid.sort((a,b)=>(isOverdue(b)?1:0)-(isOverdue(a)?1:0)).map(o=>{
     const bal=o.amount-o.advance;const od=isOverdue(o);
     return`<tr class="${od?'tr-l':''}">
-      <td style="font-weight:500;color:#111827">${o.customer}${od?' 🚨':''}</td>
-      <td style="font-family:var(--mono);color:#6B7280">${o.id}</td>
-      <td style="color:#6B7280">${o.city||'—'}</td>
+      <td style="font-weight:500;color:#111827">${esc(o.customer)}${od?' 🚨':''}</td>
+      <td style="font-family:var(--mono);color:#6B7280">${esc(o.id)}</td>
+      <td style="color:#6B7280">${esc(o.city||'—')}</td>
       <td><span style="font-size:10px;padding:2px 7px;border-radius:20px;background:${orderStatusBg(o.status)};color:${orderStatusColor(o.status)};font-family:var(--mono);font-weight:600">${o.status.toUpperCase()}</span></td>
       <td class="num">${fmtN(o.amount)}</td>
       <td class="num">${fmtN(o.advance)}</td>
       <td class="num" style="color:#B91C1C;font-weight:600">${fmt(bal)}</td>
       <td style="font-size:11px;color:${od?'#B91C1C':'#6B7280'}">${o.requiredBy?new Date(o.requiredBy+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}):'—'}</td>
-      <td><button class="btn btn-sm btn-xs" data-click="recordPayment" data-args="[&quot;${o.id}&quot;]" style="background:#FFFBEB;color:#92400E;border-color:#FDE68A">💰 Pay</button></td>
+      <td><button class="btn btn-sm btn-xs" data-click="recordPayment" data-args="[&quot;${esc(o.id)}&quot;]" style="background:#FFFBEB;color:#92400E;border-color:#FDE68A">💰 Pay</button></td>
     </tr>`;
   }).join('')}</tbody></table>`;
 }

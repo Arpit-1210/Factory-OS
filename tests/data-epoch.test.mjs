@@ -23,6 +23,8 @@ function fakeSupabase({ epoch = EPOCH, error = null, missing = false } = {}) {
       select() { return q; },
       eq(c, v) { q._f.push([c, v]); return q; },
       order() { return q; },
+      range(from, to) { return q.then(r => (r && !r.error) ? { ...r, data: (r.data || []).slice(from, to + 1) } : r); },
+      limit() { return q; },
       maybeSingle() {
         if (error) return Promise.resolve({ data: null, error: { message: error } });
         if (table !== 'data_epoch' || missing) return Promise.resolve({ data: null, error: null });
@@ -63,6 +65,8 @@ function fakeTables(tables) {
       select() { return q; },
       eq(c, v) { q._f.push([c, v]); return q; },
       order() { return q; },
+      range(from, to) { return q.then(r => (r && !r.error) ? { ...r, data: (r.data || []).slice(from, to + 1) } : r); },
+      limit() { return q; },
       not() { return q; }, update() { return q; }, delete() { return q; },
       maybeSingle() { return Promise.resolve({ data: rows()[0] || null, error: null }); },
       single() { return q.maybeSingle(); },
@@ -235,7 +239,7 @@ describe('what the floor actually sees afterwards', () => {
     assert.equal((S2.rawLog || []).length, 0, 'no raw material issued');
     assert.equal((S2.fgTransfers || []).length, 0, 'no stage movements');
     assert.equal((S2.lab || []).length, 2, 'the workers the database holds');
-    assert.deepEqual((S2.lab || []).map(l => l.name).sort(),
+    assert.deepEqual([...(S2.lab || []).map(l => l.name)].sort(),
       ['Ajay', 'SUBODH CHOUDHARY'], 'by name, from Postgres');
     assert.equal((S2.lab || []).filter(l => l.present).length, 0,
       'and nobody is marked present, because attendance was cleared');

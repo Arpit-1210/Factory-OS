@@ -17,7 +17,7 @@
 // ==================================================================
 
 import { getFGBalance, isOverdue } from '../core/calc.js';
-import { argsAttr, fmt, todayStr } from '../core/format.js';
+import { argsAttr, fmt, todayStr, esc } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { sendGet } from '../core/sheets-sync.js';
 import { persist } from '../core/sync.js';
@@ -71,14 +71,14 @@ export function renderOrders(){
       <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-            <span style="font-weight:600;font-size:14px;color:#111827">${o.customer}</span>
-            <span style="font-family:var(--mono);font-size:9px;color:#9CA3AF">${o.id}</span>
+            <span style="font-weight:600;font-size:14px;color:#111827">${esc(o.customer)}</span>
+            <span style="font-family:var(--mono);font-size:9px;color:#9CA3AF">${esc(o.id)}</span>
             <span style="font-size:10px;padding:2px 8px;border-radius:20px;background:${orderStatusBg(o.status)};color:${orderStatusColor(o.status)};font-weight:600;font-family:var(--mono)">${o.status.toUpperCase()}</span>
             ${od?'<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:#FEF2F2;color:#B91C1C;font-weight:600;font-family:var(--mono)">OVERDUE</span>':''}
             ${o.priority!=='normal'?`<span style="font-size:10px;color:${priorityColor};font-weight:600">${o.priority==='urgent'?'🚨 URGENT':'⚡ HIGH'}</span>`:''}
           </div>
-          <div style="font-size:12px;color:#6B7280">${o.city}${o.phone?' · '+o.phone:''} ${o.requiredBy?' · Required by '+new Date(o.requiredBy+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}):''}</div>
-          ${o.items?`<div style="font-size:12px;color:#374151;margin-top:3px">${o.items}</div>`:''}
+          <div style="font-size:12px;color:#6B7280">${esc(o.city)}${o.phone?' · '+esc(o.phone):''} ${o.requiredBy?' · Required by '+new Date(o.requiredBy+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}):''}</div>
+          ${o.items?`<div style="font-size:12px;color:#374151;margin-top:3px">${esc(o.items)}</div>`:''}
         </div>
         <div style="text-align:right">
           <div style="font-family:var(--mono);font-size:16px;font-weight:700;color:#111827">${fmt(o.amount)}</div>
@@ -87,11 +87,11 @@ export function renderOrders(){
         </div>
       </div>
       <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-        ${o.status==='pending'?`<button class="btn btn-sm" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;production&quot;]" style="background:#EFF6FF;color:#1E40AF;border-color:#BFDBFE">→ Start Production</button>`:''}
-        ${o.status==='production'?`<button class="btn btn-sm" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;ready&quot;]" style="background:#ECFDF5;color:#065F46;border-color:#A7F3D0">→ Mark Ready</button>`:''}
-        ${o.status==='ready'?`<button class="btn btn-sm" data-click="updateOrderStatus" data-args="[&quot;${o.id}&quot;,&quot;dispatched&quot;]" style="background:#F9FAFB;color:#374151;border-color:#E5E7EB">🚚 Dispatch</button>`:''}
-        ${balance>0 && o.status!=='dispatched'?`<button class="btn btn-sm" data-click="recordPayment" data-args="[&quot;${o.id}&quot;]" style="background:#FFFBEB;color:#92400E;border-color:#FDE68A">💰 Record Payment</button>`:''}
-        <button class="btn btn-sm btn-ember btn-xs" data-click="deleteOrder" data-args="[&quot;${o.id}&quot;]">✕</button>
+        ${o.status==='pending'?`<button class="btn btn-sm" data-click="updateOrderStatus" data-args="[&quot;${esc(o.id)}&quot;,&quot;production&quot;]" style="background:#EFF6FF;color:#1E40AF;border-color:#BFDBFE">→ Start Production</button>`:''}
+        ${o.status==='production'?`<button class="btn btn-sm" data-click="updateOrderStatus" data-args="[&quot;${esc(o.id)}&quot;,&quot;ready&quot;]" style="background:#ECFDF5;color:#065F46;border-color:#A7F3D0">→ Mark Ready</button>`:''}
+        ${o.status==='ready'?`<button class="btn btn-sm" data-click="updateOrderStatus" data-args="[&quot;${esc(o.id)}&quot;,&quot;dispatched&quot;]" style="background:#F9FAFB;color:#374151;border-color:#E5E7EB">🚚 Dispatch</button>`:''}
+        ${balance>0 && o.status!=='dispatched'?`<button class="btn btn-sm" data-click="recordPayment" data-args="[&quot;${esc(o.id)}&quot;]" style="background:#FFFBEB;color:#92400E;border-color:#FDE68A">💰 Record Payment</button>`:''}
+        <button class="btn btn-sm btn-ember btn-xs" data-click="deleteOrder" data-args="[&quot;${esc(o.id)}&quot;]">✕</button>
       </div>
     </div>`;
   }).join('');
@@ -127,7 +127,7 @@ export function filterOrderProducts(){
   dd.innerHTML = matches.map(p=>`<div data-click="selectOrderProduct" ${argsAttr(p.name, p.price||0)}
     style="padding:9px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"
     class="dd-row">
-    <span style="font-weight:500;color:var(--text)">${p.name}</span>
+    <span style="font-weight:500;color:var(--text)">${esc(p.name)}</span>
     <span style="font-family:var(--mono);font-size:11px;color:var(--text4);margin-left:12px;flex-shrink:0">₹${p.price||0}</span>
   </div>`).join('');
   dd.style.display='block';
@@ -184,7 +184,7 @@ export function renderOrderItemsList(){
         ${orderItems.map((item,i)=>`
           <tr style="border-top:1px solid var(--border);${i%2===0?'background:var(--surface)':'background:var(--bg2)'}">
             <td style="padding:10px 12px;color:var(--text4);font-family:var(--mono);font-size:11px">${i+1}</td>
-            <td style="padding:10px 12px;font-weight:500;color:var(--text)">${item.name}</td>
+            <td style="padding:10px 12px;font-weight:500;color:var(--text)">${esc(item.name)}</td>
             <td style="padding:10px 12px;text-align:right">
               <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
                 <button data-click="changeOrderItemQty" data-args="[${i},-1]" style="width:22px;height:22px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:var(--text2)">−</button>
@@ -210,6 +210,9 @@ export function updateOrderTotal(){
   document.getElementById('ord-total-display').textContent='₹'+total.toLocaleString('en-IN');
 }
 // Import from Sheets removed
+// Imported ids come from a public Apps Script feed — keep them to a safe charset.
+const safeId = v => String(v==null?'':v).replace(/[^A-Za-z0-9_.\-]/g,'').slice(0,40);
+
 export function importOrdersFromSheets(){
   if(!S.sheetsUrl){alert('Google Sheets URL not set. Go to Settings → Google Sheets.');return;}
   const statusEl = document.getElementById('import-status');
@@ -227,7 +230,7 @@ export function importOrdersFromSheets(){
       const exists=S.orders.find(o=>o.id===row.id||(o.customer===row.customer&&o.createdAt===row.date));
       if(!exists){
         S.orders.unshift({
-          id:row.id||('IMP-'+uid()),
+          id:safeId(row.id)||('IMP-'+uid()),
           customer:row.customer||'',
           phone:row.phone||'',
           city:row.city||'',
@@ -280,7 +283,7 @@ export function importOrdersFromSheets(){
             if(!row.customer) return;
             const exists=S.orders.find(o=>o.id===row.id||(o.customer===row.customer&&o.createdAt===row.date));
             if(!exists){
-              S.orders.unshift({id:row.id||('IMP-'+uid()),customer:row.customer||'',phone:row.phone||'',city:row.city||'',requiredBy:row.requiredBy||'',priority:row.priority||'normal',amount:parseFloat(row.amount)||0,advance:parseFloat(row.advance)||0,items:row.items||'',status:row.status||'pending',createdAt:row.date||S.workDate||todayStr(),fromSheets:true});
+              S.orders.unshift({id:safeId(row.id)||('IMP-'+uid()),customer:row.customer||'',phone:row.phone||'',city:row.city||'',requiredBy:row.requiredBy||'',priority:row.priority||'normal',amount:parseFloat(row.amount)||0,advance:parseFloat(row.advance)||0,items:row.items||'',status:row.status||'pending',createdAt:row.date||S.workDate||todayStr(),fromSheets:true});
               added++;
             }
           });
@@ -297,7 +300,7 @@ export function saveOrder(){
   const amount = parseFloat(document.getElementById('ord-amount').value)||0;
   if(!customer){alert('Enter customer name.');return;}
   if(!orderItems.length){alert('Add at least one item.');return;}
-  const itemsStr = orderItems.map(i=>`${i.name} x${i.qty}`).join(', ');
+  const itemsStr = orderItems.map(i=>`${esc(i.name)} x${i.qty}`).join(', ');
   const order = {
     id: 'ORD-'+Date.now().toString().slice(-6),
     customer,
@@ -346,7 +349,7 @@ export function saveOrder(){
     document.getElementById(id).value='';
   });
   // Show confirmation with next steps
-  alert(`✓ Order created!\n\nOrder ID: ${order.id}\nCustomer: ${order.customer}\n\n→ Go to Supervisor Teams to start production\n→ Check Inventory for stock reservation`);
+  alert(`✓ Order created!\n\nOrder ID: ${esc(order.id)}\nCustomer: ${order.customer}\n\n→ Go to Supervisor Teams to start production\n→ Check Inventory for stock reservation`);
   renderOrders();
   renderDashboard();
 }

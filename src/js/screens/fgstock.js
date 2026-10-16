@@ -19,7 +19,7 @@
 import { baseProductName, fgVariantBreakdown, getFGBalance } from '../core/calc.js';
 import { renderOpeningNotice } from './fgopening.js';
 import { FG_STAGES } from '../core/config.js';
-import { fmt, fmtN, todayStr } from '../core/format.js';
+import { fmt, fmtN, todayStr, esc } from '../core/format.js';
 import { S, uid } from '../core/state.js';
 import { persist } from '../core/sync.js';
 
@@ -82,13 +82,13 @@ export function renderFGStock(){
     html2+=`<div class="card" style="border-left:3px solid ${border};margin-bottom:12px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div style="display:flex;align-items:center;gap:10px">
-          <span style="background:${bg};color:${color};border:1px solid ${border};padding:4px 12px;border-radius:20px;font-family:var(--mono);font-size:10px;font-weight:700">${stage.toUpperCase()}</span>
+          <span style="background:${bg};color:${esc(color)};border:1px solid ${border};padding:4px 12px;border-radius:20px;font-family:var(--mono);font-size:10px;font-weight:700">${stage.toUpperCase()}</span>
           <span style="font-size:12px;color:#6B7280">${stageProds.length} products · ${totalQty} units</span>
         </div>
         <div style="font-family:var(--mono);font-size:14px;font-weight:700;color:#065F46">${fmt(totalVal)}</div>
       </div>
       ${stageProds.length?`<table class="tbl"><thead><tr>
-        <th>Product</th><th class="num">Qty in ${stage}</th><th class="num">Selling ₹/unit</th><th class="num">Stock Value ₹</th>
+        <th>Product</th><th class="num">Qty in ${esc(stage)}</th><th class="num">Selling ₹/unit</th><th class="num">Stock Value ₹</th>
         <th>Action</th>
       </tr></thead><tbody>
       ${stageProds.map(p=>{
@@ -97,13 +97,13 @@ export function renderFGStock(){
         const val=fg?p.qty*fg.price:0;
         const nextStage=FG_STAGES[FG_STAGES.indexOf(stage)+1]||'Dispatch';
         return`<tr>
-          <td style="font-weight:500;color:#111827">${p.name}</td>
+          <td style="font-weight:500;color:#111827">${esc(p.name)}</td>
           <td class="num" style="font-weight:700;font-size:14px;color:#111827">${p.qty}</td>
           <td class="num">${fg?fmtN(fg.price):'—'}</td>
           <td class="num">${fmtN(val)}</td>
           <td style="display:flex;gap:5px;flex-wrap:wrap">
-            <button class="btn btn-sm" style="background:${bg};color:${color};border-color:${border};font-size:11px" data-click="quickTransfer" data-args="[&quot;${stage}&quot;,&quot;${nextStage}&quot;,&quot;${p.name}&quot;,${p.qty}]">→ ${nextStage}</button>
-            ${stage==='Packing'?`<button class="btn btn-sm btn-jade" data-click="openAssignModal" data-args="[&quot;${p.name}&quot;,${p.qty},&quot;fgstock&quot;]">📋 Assign to Order</button>`:''}
+            <button class="btn btn-sm" style="background:${bg};color:${esc(color)};border-color:${border};font-size:11px" data-click="quickTransfer" data-args="[&quot;${esc(stage)}&quot;,&quot;${nextStage}&quot;,&quot;${esc(p.name)}&quot;,${p.qty}]">→ ${nextStage}</button>
+            ${stage==='Packing'?`<button class="btn btn-sm btn-jade" data-click="openAssignModal" data-args="[&quot;${esc(p.name)}&quot;,${p.qty},&quot;fgstock&quot;]">📋 Assign to Order</button>`:''}
           </td>
         </tr>`;
       }).join('')}
@@ -125,11 +125,11 @@ export function renderFGStock(){
     ${allMoves.slice(0,50).map(m=>`<tr>
       <td style="font-family:var(--mono);font-size:11px;color:#6B7280">${m.date}</td>
       <td><span style="font-size:10px;padding:2px 7px;border-radius:20px;font-family:var(--mono);font-weight:600;background:${m.type==='Transfer'?'#EFF6FF':'#FFFBEB'};color:${m.type==='Transfer'?'#1D4ED8':'#B45309'}">${m.type}</span></td>
-      <td style="font-weight:500;color:#111827">${m.product}</td>
+      <td style="font-weight:500;color:#111827">${esc(m.product)}</td>
       <td class="num" style="font-weight:600">${m.qty}</td>
       <td>${m.from?`<span class="sp sp${FG_STAGES.indexOf(m.from)}">${m.from}</span>`:'—'}</td>
       <td>${m.to&&m.to!=='—'?`<span class="sp sp${FG_STAGES.indexOf(m.to)}">${m.to}</span>`:m.to||'—'}</td>
-      <td style="font-size:11px;color:#6B7280">${m.note||'—'}${m.auto?'<span style="font-family:var(--mono);font-size:9px;background:#EFF6FF;color:#1D4ED8;padding:1px 5px;border-radius:10px;margin-left:4px">AUTO</span>':''}</td>
+      <td style="font-size:11px;color:#6B7280">${esc(m.note||'—')}${m.auto?'<span style="font-family:var(--mono);font-size:9px;background:#EFF6FF;color:#1D4ED8;padding:1px 5px;border-radius:10px;margin-left:4px">AUTO</span>':''}</td>
     </tr>`).join('')}
     </tbody></table>`
   :'<div style="color:#9CA3AF;font-size:12px">No transfers recorded yet.</div>';
@@ -150,7 +150,7 @@ Enter quantity to transfer:`));
 export function openFGTransfer(){
   initFGStock();
   const sel=document.getElementById('fgt-prod');
-  sel.innerHTML=S.fg.map(f=>`<option value="${f.name}">${f.name}</option>`).join('');
+  sel.innerHTML=S.fg.map(f=>`<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('');
   document.getElementById('fgt-date').value=S.workDate||todayStr();
   document.getElementById('fg-transfer-form').style.display='block';
   document.getElementById('fg-transfer-form').scrollIntoView({behavior:'smooth'});
@@ -180,7 +180,7 @@ export function saveFGTransfer(){
 export function openFGAdjust(){
   initFGStock();
   const sel=document.getElementById('fga-prod');
-  sel.innerHTML=S.fg.map(f=>`<option value="${f.name}">${f.name}</option>`).join('');
+  sel.innerHTML=S.fg.map(f=>`<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('');
   document.getElementById('fg-adjust-form').style.display='block';
 }
 export function closeFGAdjust(){document.getElementById('fg-adjust-form').style.display='none';}
